@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brig-mark-on-dark.svg">
+    <img alt="brig" src="assets/brig-mark-on-light.svg" width="72">
+  </picture>
+</p>
+
 # community-images
 
 Guest images for the coding agents brig runs, with open Dockerfiles.
