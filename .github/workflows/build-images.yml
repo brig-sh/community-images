@@ -106,11 +106,12 @@ jobs:
               - "images/agent.mk"
               - ".github/workflows/build-images.yml"
 
-      # `all` deliberately excludes cursor. The Dockerfile is in the repo and
-      # is built on every pull request, but publishing it would mean hosting a
+      # `all` deliberately excludes cursor: publishing it would mean hosting a
       # redistribution of Cursor's binary, and that terms check is still open
-      # (brig-sh/community-images: see the Cursor note in the README). It
-      # publishes only when someone dispatches it by name, on purpose.
+      # (see the Cursor note in the README). This list is a convenience, not
+      # the gate -- a push still puts cursor in the matrix, because a change
+      # to this workflow matches every filter above. The gate that actually
+      # holds is per job, in "Decide whether to publish" below.
       - id: pick
         env:
           EVENT: ${{ github.event_name }}
@@ -159,18 +160,39 @@ jobs:
       - name: Install syft
         uses: anchore/sbom-action/download-syft@v0
 
-      # Whether this run publishes at all. A push to main publishes what
-      # changed; a dispatch publishes only if asked. Pull requests never do.
+      # Whether this job publishes. A push to main publishes what changed; a
+      # dispatch publishes only if asked. Pull requests never do.
+      #
+      # cursor needs its own clause on top of that. It is built and checked
+      # everywhere, but we may only publish it from an explicit dispatch of
+      # that one image -- never as a side effect of landing something on main.
+      # Leaving it out of `select`'s publishable list is not enough: a change
+      # to this workflow matches every paths-filter, so a push puts cursor in
+      # the matrix and it would publish along with everything else. Gating per
+      # job rather than per list means it cannot be published by accident
+      # however it got here.
       - name: Decide whether to publish
         id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          WANT_PUSH: ${{ inputs.push }}
+          INPUT_IMAGE: ${{ inputs.image }}
+          IMAGE_NAME: ${{ matrix.image }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "push" ] \
-             || { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.push }}" = "true" ]; }; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=false" >> "$GITHUB_OUTPUT"
+          publish=false
+          if [ "$EVENT" = "push" ]; then
+            publish=true
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ "$WANT_PUSH" = "true" ]; then
+            publish=true
           fi
+          if [ "$IMAGE_NAME" = "cursor" ] \
+             && { [ "$EVENT" != "workflow_dispatch" ] || [ "$INPUT_IMAGE" != "cursor" ]; }; then
+            publish=false
+            echo "cursor: build and check only, see the Cursor note in the README"
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish"
 
       - name: Log in to GHCR
         if: steps.mode.outputs.publish == 'true'
