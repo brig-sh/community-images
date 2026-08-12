@@ -1,0 +1,253 @@
+name: Build images
+
+# Build the agent guest images and publish them to ghcr.io/brig-sh, signed.
+#
+# One job per image, gated on what actually changed: a pull request touching
+# only images/codex/ builds codex and nothing else. Touching this workflow
+# rebuilds everything, since every job depends on it.
+#
+#   pull_request      build the changed images, do not push. Proof that the
+#                     Dockerfiles still assemble and that what they produce is
+#                     bootable (see `make check`).
+#   push to main      build the changed images and publish them. This is the
+#                     "CI publishes on change" path.
+#   workflow_dispatch build one image or all of them, publish with push=true.
+#
+# Publishing needs no registry secret: the built-in GITHUB_TOKEN carries
+# packages: write. Signing needs no key either -- cosign takes a short-lived
+# certificate from Sigstore against this workflow's OIDC identity, which is
+# what `id-token: write` below is for. The identity a consumer verifies
+# against is this file's path on this repo's main branch; the exact command
+# is in the README.
+#
+# arm64 only for now, which is what hull boots on Apple Silicon. The
+# Dockerfiles are already architecture-neutral and build for amd64 locally
+# with PLATFORM=linux/amd64, but an amd64 guest needs a kernel with the
+# block-root virtio drivers built in, and that kernel build is not wired up
+# here yet.
+
+on:
+  pull_request:
+    paths:
+      - "images/**"
+      - ".github/workflows/build-images.yml"
+  push:
+    branches: [main]
+    paths:
+      - "images/**"
+      - ".github/workflows/build-images.yml"
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Image to build"
+        type: choice
+        options: [all, claude-code, codex, gemini, grok, opencode, cursor]
+        default: all
+      push:
+        description: "Publish to ghcr.io/brig-sh"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+  # Sigstore hands out the signing certificate against this token.
+  id-token: write
+  # paths-filter lists a pull request's files through the API.
+  pull-requests: read
+
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io/brig-sh
+  PLATFORM: linux/arm64
+
+jobs:
+  # Decide which images to build. On a pull request or a push, paths-filter
+  # maps the diff to image names; on a dispatch, the input picks one or all.
+  # The output is a JSON list consumed by the build matrix below.
+  select:
+    name: select images
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.pick.outputs.images }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        if: github.event_name != 'workflow_dispatch'
+        id: filter
+        with:
+          filters: |
+            claude-code:
+              - "images/claude-code/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+            codex:
+              - "images/codex/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+            gemini:
+              - "images/gemini/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+            grok:
+              - "images/grok/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+            opencode:
+              - "images/opencode/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+            cursor:
+              - "images/cursor/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+
+      # `all` deliberately excludes cursor. The Dockerfile is in the repo and
+      # is built on every pull request, but publishing it would mean hosting a
+      # redistribution of Cursor's binary, and that terms check is still open
+      # (brig-sh/community-images: see the Cursor note in the README). It
+      # publishes only when someone dispatches it by name, on purpose.
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_IMAGE: ${{ inputs.image }}
+          CHANGED: ${{ steps.filter.outputs.changes }}
+        run: |
+          set -euo pipefail
+          PUBLISHABLE='["claude-code","codex","gemini","grok","opencode"]'
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$INPUT_IMAGE" = "all" ]; then
+              IMAGES="$PUBLISHABLE"
+            else
+              IMAGES="$(jq -cn --arg i "$INPUT_IMAGE" '[$i]')"
+            fi
+          else
+            IMAGES="${CHANGED:-[]}"
+            # paths-filter has no previous commit to diff against on a brand
+            # new branch and reports nothing changed. The workflow only ran at
+            # all because images/** was touched, so fall back to everything
+            # rather than silently publishing nothing.
+            if [ "$(echo "$IMAGES" | jq 'length')" -eq 0 ]; then
+              IMAGES="$PUBLISHABLE"
+            fi
+          fi
+          echo "images=$IMAGES" >> "$GITHUB_OUTPUT"
+          echo "building: $IMAGES"
+
+  build:
+    name: ${{ matrix.image }}
+    needs: select
+    if: needs.select.outputs.images != '[]'
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.select.outputs.images) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.4
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      # Whether this run publishes at all. A push to main publishes what
+      # changed; a dispatch publishes only if asked. Pull requests never do.
+      - name: Decide whether to publish
+        id: mode
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ] \
+             || { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.push }}" = "true" ]; }; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to GHCR
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          crane auth login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
+
+      # Builds the bunny base, compiles urunit and urunit-agent from their
+      # public sources, and overlays them. `check` then asserts the result is
+      # actually bootable -- kernel, urunc metadata, both guest binaries -- and
+      # that the agent CLI runs as the image's unprivileged user. That check is
+      # the gate: a broken image fails here rather than at someone's boot.
+      - name: Build and check ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          echo "IMAGE_REF=$REGISTRY/${{ matrix.image }}:arm64" >> "$GITHUB_ENV"
+          make -C "images/${{ matrix.image }}" build check \
+            IMAGE="$REGISTRY/${{ matrix.image }}:arm64" \
+            REVISION="$GITHUB_SHA"
+
+      - name: Push ${{ matrix.image }}
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          make -C "images/${{ matrix.image }}" push IMAGE="$IMAGE_REF"
+          # An immutable alias next to the moving :arm64 tag, so a consumer can
+          # pin a build without pinning a digest by hand.
+          crane tag "$IMAGE_REF" "arm64-${GITHUB_SHA::7}"
+          DIGEST="$(crane digest "$IMAGE_REF")"
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          echo "published $IMAGE_REF@$DIGEST"
+
+      # Sign the digest, never the tag: a tag can be moved to another image
+      # afterwards and the signature would follow it. Keyless -- the
+      # certificate binds this workflow's OIDC identity, and the signature
+      # lands in Sigstore's transparency log.
+      - name: Sign ${{ matrix.image }}
+        if: steps.mode.outputs.publish == 'true'
+        run: cosign sign --yes "$IMAGE_REF@$DIGEST"
+
+      # SBOM over what was actually published, read back from the registry
+      # rather than from the local build, then attached as a signed
+      # attestation on the same digest.
+      - name: Attest SBOM for ${{ matrix.image }}
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          syft "$IMAGE_REF@$DIGEST" -o spdx-json > sbom.spdx.json
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$IMAGE_REF@$DIGEST"
+
+      # Verify from the outside, in the same run: if this fails, the artifact
+      # is not usable by the verification instructions we publish.
+      - name: Verify signature and attestation
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-images.yml@refs/"
+          cosign verify \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE_REF@$DIGEST" > /dev/null
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE_REF@$DIGEST" > /dev/null
+          echo "verified $IMAGE_REF@$DIGEST"
+
+      - name: Summary
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          {
+            echo "### ${{ matrix.image }}"
+            echo
+            echo '```'
+            echo "$IMAGE_REF@$DIGEST"
+            echo "$REGISTRY/${{ matrix.image }}:arm64-${GITHUB_SHA::7}"
+            echo '```'
+            echo
+            echo "signed (keyless) and SBOM-attested."
+          } >> "$GITHUB_STEP_SUMMARY"
