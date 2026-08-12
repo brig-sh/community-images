@@ -1,0 +1,20 @@
+# Overlay stage: inject the urunc guest binaries onto the bunny-built image.
+#
+# Deliberately a plain docker build with no #syntax line. bunny injects its
+# own stock urunit, which the agent-capable one has to override, and a plain
+# build inherits bunny's guest kernel and urunc annotations untouched.
+ARG BASE
+FROM ${BASE}
+
+ARG SOURCE_URL=https://github.com/brig-sh/community-images
+ARG REVISION=unknown
+LABEL org.opencontainers.image.source="${SOURCE_URL}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.title="Cursor Agent" \
+      org.opencontainers.image.description="Cursor Agent (Cursor) as a bootable brig guest image" \
+      sh.brig.agent="cursor" \
+      sh.brig.agent.cli="cursor-agent"
+
+COPY dist/urunit /urunit
+COPY dist/urunit-agent /urunit-agent

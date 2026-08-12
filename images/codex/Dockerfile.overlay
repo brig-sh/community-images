@@ -1,0 +1,20 @@
+# Overlay stage: inject the urunc guest binaries onto the bunny-built image.
+#
+# Deliberately a plain docker build with no #syntax line. bunny injects its
+# own stock urunit, which the agent-capable one has to override, and a plain
+# build inherits bunny's guest kernel and urunc annotations untouched.
+ARG BASE
+FROM ${BASE}
+
+ARG SOURCE_URL=https://github.com/brig-sh/community-images
+ARG REVISION=unknown
+LABEL org.opencontainers.image.source="${SOURCE_URL}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.title="Codex" \
+      org.opencontainers.image.description="Codex (OpenAI) as a bootable brig guest image" \
+      sh.brig.agent="codex" \
+      sh.brig.agent.cli="codex"
+
+COPY dist/urunit /urunit
+COPY dist/urunit-agent /urunit-agent
