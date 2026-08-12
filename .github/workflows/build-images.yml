@@ -74,7 +74,7 @@ jobs:
     outputs:
       images: ${{ steps.pick.outputs.images }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dorny/paths-filter@v3
         if: github.event_name != 'workflow_dispatch'
@@ -148,7 +148,7 @@ jobs:
       matrix:
         image: ${{ fromJSON(needs.select.outputs.images) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install crane
         uses: imjasonh/setup-crane@v0.4
