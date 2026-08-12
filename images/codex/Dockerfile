@@ -51,8 +51,16 @@ RUN arch="$(dpkg --print-architecture)" \
  && /usr/local/bin/codex --version
 
 # No credential is baked, here or in any image in this repo. Sign in at
-# runtime with `codex login`; the resulting ~/.codex/auth.json lives in the
-# home directory, which is exactly what brig persists.
+# runtime with `codex login --device-auth`; the resulting ~/.codex/auth.json
+# lives in the home directory, which is exactly what brig persists.
+#
+# The device-code flow specifically, not plain `codex login`. That one opens a
+# listener on the guest's loopback and hands the provider a redirect_uri of
+# http://localhost:<port>/callback -- but `localhost` is whichever machine is
+# running the *browser*, and that is the host, not the guest. The browser hits
+# its own loopback, finds nothing listening, and the login never completes.
+# Device auth has no redirect and no listener: the CLI polls the provider
+# outbound, which is all a sandboxed guest can do anyway.
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     TERM=xterm-256color
