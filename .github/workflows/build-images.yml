@@ -1,0 +1,383 @@
+name: Build images
+
+# Build the agent guest images and publish them to ghcr.io/brig-sh, signed.
+#
+# One job per image per architecture, gated on what actually changed: a pull
+# request touching only images/codex/ builds codex and nothing else. Touching
+# this workflow rebuilds everything, since every job depends on it.
+#
+#   pull_request      build the changed images, do not push. Proof that the
+#                     Dockerfiles still assemble and that what they produce is
+#                     bootable (see `make check`).
+#   push to main      build the changed images and publish them. This is the
+#                     "CI publishes on change" path.
+#   workflow_dispatch build one image or all of them, publish with push=true.
+#
+# Publishing needs no registry secret: the built-in GITHUB_TOKEN carries
+# packages: write. Signing needs no key either -- cosign takes a short-lived
+# certificate from Sigstore against this workflow's OIDC identity, which is
+# what `id-token: write` below is for. The identity a consumer verifies
+# against is this file's path on this repo's main branch; the exact command
+# is in the README.
+#
+# Both architectures are built: arm64 for hull on Apple Silicon, amd64 for
+# urunc on Linux. Both currently boot on the kernel bunny bundles.
+#
+# Guest kernels are built and published by `Build kernel`, not here -- they
+# change with the setup they boot on, which is rare, while these images change
+# whenever an agent CLI moves, which is often. Wiring the images to pull a
+# published kernel profile is the next step; see kernel/build-kernel.sh.
+
+on:
+  pull_request:
+    paths:
+      - "images/**"
+      - ".github/workflows/build-images.yml"
+  push:
+    branches: [main]
+    paths:
+      - "images/**"
+      - ".github/workflows/build-images.yml"
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Image to build"
+        type: choice
+        options: [all, claude-code, codex, gemini, grok, opencode, cursor]
+        default: all
+      push:
+        description: "Publish to ghcr.io/brig-sh"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+  # Sigstore hands out the signing certificate against this token.
+  id-token: write
+  # paths-filter lists a pull request's files through the API.
+  pull-requests: read
+
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io/brig-sh
+  # Build tools are pinned like everything else this repo installs. Bump them
+  # deliberately.
+  CRANE_VERSION: v0.21.9
+  COSIGN_VERSION: v3.1.3
+  SYFT_VERSION: 1.51.0
+
+jobs:
+  # Decide which images to build. On a pull request or a push, paths-filter
+  # maps the diff to image names; on a dispatch, the input picks one or all.
+  # The output is a JSON list consumed by the build matrix below.
+  select:
+    name: select images
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.pick.outputs.images }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dorny/paths-filter@v3
+        if: github.event_name != 'workflow_dispatch'
+        id: filter
+        with:
+          filters: |
+            claude-code:
+              - "images/claude-code/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+            codex:
+              - "images/codex/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+            gemini:
+              - "images/gemini/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+            grok:
+              - "images/grok/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+            opencode:
+              - "images/opencode/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+            cursor:
+              - "images/cursor/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
+
+      # `all` deliberately excludes cursor: publishing it would mean hosting a
+      # redistribution of Cursor's binary, and that terms check is still open
+      # (see the Cursor note in the README). This list is a convenience, not
+      # the gate -- a push still puts cursor in the matrix, because a change
+      # to this workflow matches every filter above. The gate that actually
+      # holds is per job, in "Decide whether to publish" below.
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_IMAGE: ${{ inputs.image }}
+          CHANGED: ${{ steps.filter.outputs.changes }}
+        run: |
+          set -euo pipefail
+          PUBLISHABLE='["claude-code","codex","gemini","grok","opencode"]'
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$INPUT_IMAGE" = "all" ]; then
+              IMAGES="$PUBLISHABLE"
+            else
+              IMAGES="$(jq -cn --arg i "$INPUT_IMAGE" '[$i]')"
+            fi
+          else
+            IMAGES="${CHANGED:-[]}"
+            # paths-filter has no previous commit to diff against on a brand
+            # new branch and reports nothing changed. The workflow only ran at
+            # all because images/** was touched, so fall back to everything
+            # rather than silently publishing nothing.
+            if [ "$(echo "$IMAGES" | jq 'length')" -eq 0 ]; then
+              IMAGES="$PUBLISHABLE"
+            fi
+          fi
+          echo "images=$IMAGES" >> "$GITHUB_OUTPUT"
+          echo "building: $IMAGES"
+
+  build:
+    name: ${{ matrix.image }} (${{ matrix.arch }})
+    needs: select
+    if: needs.select.outputs.images != '[]'
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      # Twelve jobs starting at once all pull the same few release assets in
+      # their first seconds, and that burst is what truncated the crane
+      # download. The installers retry now, but there is no reason to create
+      # the stampede in the first place, and nothing here is latency-critical.
+      max-parallel: 6
+      matrix:
+        image: ${{ fromJSON(needs.select.outputs.images) }}
+        arch: [arm64, amd64]
+    steps:
+      - uses: actions/checkout@v5
+
+      # All three come from GitHub releases, pinned, through one helper that
+      # retries and checks a sha256. The packaged installers do none of that;
+      # see .github/scripts/install-release-tool.sh for the failures that
+      # cost us.
+      - name: Install crane, cosign and syft
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            aarch64|arm64) garch=arm64;  parch=arm64 ;;
+            x86_64|amd64)  garch=x86_64; parch=amd64 ;;
+            *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          s=.github/scripts/install-release-tool.sh
+          gcr="https://github.com/google/go-containerregistry/releases/download/$CRANE_VERSION"
+          "$s" --name crane --tar-member crane \
+            --url "$gcr/go-containerregistry_Linux_${garch}.tar.gz" \
+            --checksums "$gcr/checksums.txt"
+          cos="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION"
+          "$s" --name cosign \
+            --url "$cos/cosign-linux-${parch}" \
+            --checksums "$cos/cosign_checksums.txt"
+          sy="https://github.com/anchore/syft/releases/download/v$SYFT_VERSION"
+          "$s" --name syft --tar-member syft \
+            --url "$sy/syft_${SYFT_VERSION}_linux_${parch}.tar.gz" \
+            --checksums "$sy/syft_${SYFT_VERSION}_checksums.txt"
+
+      # Whether this job publishes. A push to main publishes what changed; a
+      # dispatch publishes only if asked. Pull requests never do.
+      #
+      # cursor needs its own clause on top of that. It is built and checked
+      # everywhere, but we may only publish it from an explicit dispatch of
+      # that one image -- never as a side effect of landing something on main.
+      # Leaving it out of `select`'s publishable list is not enough: a change
+      # to this workflow matches every paths-filter, so a push puts cursor in
+      # the matrix and it would publish along with everything else. Gating per
+      # job rather than per list means it cannot be published by accident
+      # however it got here.
+      - name: Decide whether to publish
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          WANT_PUSH: ${{ inputs.push }}
+          INPUT_IMAGE: ${{ inputs.image }}
+          IMAGE_NAME: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          publish=false
+          if [ "$EVENT" = "push" ]; then
+            publish=true
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ "$WANT_PUSH" = "true" ]; then
+            publish=true
+          fi
+          if [ "$IMAGE_NAME" = "cursor" ] \
+             && { [ "$EVENT" != "workflow_dispatch" ] || [ "$INPUT_IMAGE" != "cursor" ]; }; then
+            publish=false
+            echo "cursor: build and check only, see the Cursor note in the README"
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish"
+
+      - name: Log in to GHCR
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          crane auth login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
+
+      # Builds the bunny base, compiles urunit and urunit-agent from their
+      # public sources, and overlays them. `check` then asserts the result is
+      # actually bootable -- kernel, urunc metadata, both guest binaries -- and
+      # that the agent CLI runs as the image's unprivileged user. That check is
+      # the gate: a broken image fails here rather than at someone's boot.
+      - name: Build and check ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          echo "IMAGE_REF=$REGISTRY/${{ matrix.image }}:${{ matrix.arch }}" >> "$GITHUB_ENV"
+          make -C "images/${{ matrix.image }}" build check \
+            PLATFORM="linux/${{ matrix.arch }}" \
+            IMAGE="$REGISTRY/${{ matrix.image }}:${{ matrix.arch }}" \
+            REVISION="$GITHUB_SHA"
+
+      - name: Push ${{ matrix.image }}
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          make -C "images/${{ matrix.image }}" push IMAGE="$IMAGE_REF"
+          # An immutable alias next to the moving per-arch tag, so a consumer
+          # can pin a build without pinning a digest by hand.
+          crane tag "$IMAGE_REF" "${{ matrix.arch }}-${GITHUB_SHA::7}"
+          DIGEST="$(crane digest "$IMAGE_REF")"
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          echo "published $IMAGE_REF@$DIGEST"
+
+      # Sign the digest, never the tag: a tag can be moved to another image
+      # afterwards and the signature would follow it. Keyless -- the
+      # certificate binds this workflow's OIDC identity, and the signature
+      # lands in Sigstore's transparency log.
+      - name: Sign ${{ matrix.image }}
+        if: steps.mode.outputs.publish == 'true'
+        run: cosign sign --yes "$IMAGE_REF@$DIGEST"
+
+      # SBOM over what was actually published, read back from the registry
+      # rather than from the local build, then attached as a signed
+      # attestation on the same digest.
+      - name: Attest SBOM for ${{ matrix.image }}
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          syft "$IMAGE_REF@$DIGEST" -o spdx-json > sbom.spdx.json
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$IMAGE_REF@$DIGEST"
+
+      # Verify from the outside, in the same run: if this fails, the artifact
+      # is not usable by the verification instructions we publish.
+      - name: Verify signature and attestation
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-images.yml@refs/"
+          cosign verify \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE_REF@$DIGEST" > /dev/null
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE_REF@$DIGEST" > /dev/null
+          echo "verified $IMAGE_REF@$DIGEST"
+
+      - name: Summary
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          {
+            echo "### ${{ matrix.image }} (${{ matrix.arch }})"
+            echo
+            echo '```'
+            echo "$IMAGE_REF@$DIGEST"
+            echo "$REGISTRY/${{ matrix.image }}:${{ matrix.arch }}-${GITHUB_SHA::7}"
+            echo '```'
+            echo
+            echo "signed (keyless) and SBOM-attested."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Stitch the two per-arch tags into a multi-arch index under :latest, so a
+  # plain `docker pull ghcr.io/brig-sh/<agent>` resolves to the right one. This
+  # matters more here than for an ordinary image: each arch bundles a different
+  # guest kernel, so pulling the wrong one does not merely run slowly, it does
+  # not boot.
+  #
+  # The index gets signed too. It gets no SBOM of its own -- the per-arch
+  # digests carry those, and that is where the packages actually live.
+  manifest:
+    name: ${{ matrix.image }} (index)
+    needs: [select, build]
+    if: >-
+      needs.select.outputs.images != '[]' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.push))
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.select.outputs.images) }}
+    steps:
+      # The repo is checked out for the installer helper below; this job
+      # builds nothing from source.
+      - uses: actions/checkout@v5
+
+      - name: Install crane and cosign
+        run: |
+          set -euo pipefail
+          s=.github/scripts/install-release-tool.sh
+          gcr="https://github.com/google/go-containerregistry/releases/download/$CRANE_VERSION"
+          "$s" --name crane --tar-member crane \
+            --url "$gcr/go-containerregistry_Linux_x86_64.tar.gz" \
+            --checksums "$gcr/checksums.txt"
+          cos="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION"
+          "$s" --name cosign \
+            --url "$cos/cosign-linux-amd64" \
+            --checksums "$cos/cosign_checksums.txt"
+
+      # Same cursor rule as the build job: never assemble or publish an index
+      # for an image we do not host.
+      - name: Decide whether to publish
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_IMAGE: ${{ inputs.image }}
+          IMAGE_NAME: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          publish=true
+          if [ "$IMAGE_NAME" = "cursor" ] \
+             && { [ "$EVENT" != "workflow_dispatch" ] || [ "$INPUT_IMAGE" != "cursor" ]; }; then
+            publish=false
+            echo "cursor: no index, see the Cursor note in the README"
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: steps.mode.outputs.publish == 'true'
+        run: crane auth login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
+
+      - name: Assemble and sign the index
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          REF="$REGISTRY/${{ matrix.image }}"
+          crane index append \
+            -m "$REF:arm64" -m "$REF:amd64" \
+            -t "$REF:latest"
+          DIGEST="$(crane digest "$REF:latest")"
+          cosign sign --yes "$REF@$DIGEST"
+          IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-images.yml@refs/"
+          cosign verify \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$REF@$DIGEST" > /dev/null
+          echo "index $REF:latest@$DIGEST"
+          crane manifest "$REF:latest" | jq -r '.manifests[] | "  \(.platform.os)/\(.platform.architecture) \(.digest)"'

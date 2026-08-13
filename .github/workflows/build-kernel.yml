@@ -1,0 +1,200 @@
+name: Build kernel
+
+# Build the guest kernels the agent images boot on and publish them, with
+# their config, as OCI artifacts under ghcr.io/brig-sh/kernel.
+#
+# Kernels are built here rather than inside the image build because they are a
+# different kind of artifact on a different cadence. An image rebuilds whenever
+# an agent CLI moves, which is often; a kernel changes when the setup it boots
+# on changes, which is rarely. Building one per image per rebuild would be
+# minutes of wasted CI for a byte-identical result.
+#
+# A profile is a setup, not an architecture:
+#
+#   arm64   brig on Apple Silicon -- virtiofs root under Virtualization.framework
+#   amd64   urunc on Linux -- ext4 block root (a devmapper snapshot)
+#
+# Each profile publishes the bootable image, the exact .config it was built
+# with, and the defconfig delta, so anyone can see what is in the kernel their
+# agent runs on rather than taking our word for it.
+#
+# The script hard-gates the required built-ins, the boot magic, that BTF was
+# generated, and a size cap -- so a silently-demoted symbol or a DWARF leak
+# fails the build instead of shipping a kernel that panics before userspace.
+#
+#   pull_request      build both profiles, do not push.
+#   workflow_dispatch build one or both, publish with push=true.
+
+on:
+  pull_request:
+    paths:
+      - "kernel/**"
+      - ".github/workflows/build-kernel.yml"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Kernel profile to build"
+        type: choice
+        options: [all, arm64, amd64]
+        default: all
+      push:
+        description: "Publish to ghcr.io/brig-sh/kernel"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+  # Sigstore hands out the signing certificate against this token.
+  id-token: write
+
+concurrency:
+  group: build-kernel-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io/brig-sh
+  KERNEL_SCRIPT: kernel/build-kernel.sh
+  # Pinned like everything else this repo installs. Bump deliberately.
+  ORAS_VERSION: 1.3.3
+  COSIGN_VERSION: v3.1.3
+
+jobs:
+  select:
+    name: select profiles
+    runs-on: ubuntu-latest
+    outputs:
+      profiles: ${{ steps.pick.outputs.profiles }}
+    steps:
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_PROFILE: ${{ inputs.profile }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$INPUT_PROFILE" != "all" ]; then
+            profiles="$(jq -cn --arg p "$INPUT_PROFILE" '[$p]')"
+          else
+            profiles='["arm64","amd64"]'
+          fi
+          echo "profiles=$profiles" >> "$GITHUB_OUTPUT"
+          echo "building: $profiles"
+
+  build:
+    name: ${{ matrix.profile }}
+    needs: select
+    # Each profile builds on a runner of its own architecture. The script does
+    # the build inside a container of the target platform, which would work
+    # emulated, but a kernel build is far too slow to emulate.
+    runs-on: ${{ matrix.profile == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ${{ fromJSON(needs.select.outputs.profiles) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # A cold kernel build is tens of minutes; with a warm ccache it is a few.
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: kbuild-${{ matrix.profile }}-${{ hashFiles('kernel/build-kernel.sh') }}
+          restore-keys: kbuild-${{ matrix.profile }}-
+
+      - name: Build the ${{ matrix.profile }} kernel
+        env:
+          PROFILE: ${{ matrix.profile }}
+          OUT: ${{ github.workspace }}/dist
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: bash "$KERNEL_SCRIPT"
+
+      - name: Report what was built
+        run: |
+          set -euo pipefail
+          echo "KVER: $(cat dist/KVER)"
+          ls -l dist/kernel
+          echo "config delta: $(grep -c '^[+-]' dist/config.diff || true) lines"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ matrix.profile }}
+          path: |
+            dist/kernel
+            dist/config
+            dist/config.diff
+            dist/KVER
+          retention-days: 14
+
+      # Both come from GitHub releases, pinned, through the same helper the
+      # image workflow uses: it retries and checks a sha256, which the packaged
+      # installers do not.
+      - name: Install oras and cosign
+        if: github.event_name == 'workflow_dispatch' && inputs.push
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            aarch64|arm64) parch=arm64 ;;
+            x86_64|amd64)  parch=amd64 ;;
+            *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          s=.github/scripts/install-release-tool.sh
+          o="https://github.com/oras-project/oras/releases/download/v$ORAS_VERSION"
+          "$s" --name oras --tar-member oras \
+            --url "$o/oras_${ORAS_VERSION}_linux_${parch}.tar.gz" \
+            --checksums "$o/oras_${ORAS_VERSION}_checksums.txt"
+          cos="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION"
+          "$s" --name cosign \
+            --url "$cos/cosign-linux-${parch}" \
+            --checksums "$cos/cosign_checksums.txt"
+
+      # Two tags per profile: an immutable one carrying the kernel version, and
+      # a moving one the images track. Both point at the same push.
+      - name: Publish the ${{ matrix.profile }} kernel
+        if: github.event_name == 'workflow_dispatch' && inputs.push
+        run: |
+          set -euo pipefail
+          oras login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
+          KVER="$(cat dist/KVER)"
+          REF="$REGISTRY/kernel"
+          cd dist
+          oras push \
+            "$REF:${{ matrix.profile }}-$KVER,${{ matrix.profile }}" \
+            --artifact-type application/vnd.brig.kernel.v1 \
+            kernel:application/vnd.brig.kernel.image \
+            config:text/plain \
+            config.diff:text/plain \
+            KVER:text/plain
+          DIGEST="$(oras manifest fetch --descriptor "$REF:${{ matrix.profile }}" | jq -r .digest)"
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          echo "published $REF:${{ matrix.profile }}-$KVER@$DIGEST"
+
+      # Signed like everything else this org publishes. A kernel is the last
+      # artifact anyone should take on trust.
+      - name: Sign and verify
+        if: github.event_name == 'workflow_dispatch' && inputs.push
+        run: |
+          set -euo pipefail
+          REF="$REGISTRY/kernel"
+          cosign sign --yes "$REF@$DIGEST"
+          IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-kernel.yml@refs/"
+          cosign verify \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$REF@$DIGEST" > /dev/null
+          echo "verified $REF@$DIGEST"
+
+      - name: Summary
+        if: github.event_name == 'workflow_dispatch' && inputs.push
+        run: |
+          {
+            echo "### kernel: ${{ matrix.profile }}"
+            echo
+            echo '```'
+            echo "$REGISTRY/kernel:${{ matrix.profile }}-$(cat dist/KVER)"
+            echo "$REGISTRY/kernel:${{ matrix.profile }}"
+            echo "$DIGEST"
+            echo '```'
+            echo
+            echo "signed (keyless). Ships kernel + config + config.diff + KVER."
+          } >> "$GITHUB_STEP_SUMMARY"
