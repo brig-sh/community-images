@@ -54,8 +54,10 @@ Each agent is published twice, from the same Dockerfile:
 
 The stock variant is for the cases where a microVM is not what you want --
 running the agent under docker or podman, in a Kubernetes pod, in CI, or as a
-base to build your own guest image on. It is tens of megabytes smaller,
-because it carries no kernel.
+base to build your own guest image on. It is about 8MB smaller on the wire
+(`codex` 269MB against `codex-stock` 261MB): the guest kernel and the two init
+binaries, and not much else. The rootfs is the same, so most of the size is
+Ubuntu and the agent either way.
 
 They are not two Dockerfiles. The `#syntax` line is stripped and the same file
 is built plainly, in the same CI job, on the same runner, against the same
