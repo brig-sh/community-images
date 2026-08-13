@@ -33,6 +33,16 @@ IMAGE       ?= $(REGISTRY)/$(AGENT):$(TAG)
 # Per-arch, so building both locally does not have one clobber the other.
 BASE_TAG    ?= brig-$(AGENT):base-$(TAG)
 
+# The stock variant: the same rootfs as an ordinary container image, with none
+# of the microVM machinery. No guest kernel, no urunit, no urunc.json -- just
+# the agent CLI on Ubuntu, for docker/podman/Kubernetes, or as a base to build
+# your own guest image on.
+#
+# Built from the *same* Dockerfile with the bunny `#syntax` line stripped,
+# never from a copy. Two Dockerfiles per agent would drift, and the whole
+# claim here is that the two variants contain the same thing.
+STOCK_IMAGE ?= $(REGISTRY)/$(AGENT)-stock:$(TAG)
+
 # uid 501 is the first human user on macOS. Files the agent writes to a
 # virtiofs share (its persistent home, a mounted project) then land with the
 # host user's ownership and stay writable both ways. Override on Linux hosts.
@@ -65,7 +75,8 @@ BUILD_DIR   := dist
 urunc_src   = $(if $(URUNC_SRC),$(abspath $(URUNC_SRC)),$(CURDIR)/$(BUILD_DIR)/src/urunc)
 urunit_src  = $(if $(URUNIT_SRC),$(abspath $(URUNIT_SRC)),$(CURDIR)/$(BUILD_DIR)/src/urunit)
 
-.PHONY: all build sources base binaries overlay check push clean
+.PHONY: all build sources base binaries overlay check push clean \
+        stock check-stock push-stock
 
 all: build check push
 
@@ -184,6 +195,54 @@ push:
 	docker save $(IMAGE) -o $(BUILD_DIR)/image.tar
 	crane push $(BUILD_DIR)/image.tar $(IMAGE)
 	rm -f $(BUILD_DIR)/image.tar
+
+# --- the stock variant -----------------------------------------------------
+#
+# Strip the `#syntax=` directive and BuildKit stops using bunny as its
+# frontend, so the very same Dockerfile produces an ordinary OCI image. No
+# overlay stage either: urunit and urunit-agent are guest-init binaries with
+# nothing to do in a container.
+#
+# The labels are applied here rather than inherited, because the overlay is
+# what carries them for the bootable variant and this variant skips it.
+stock: | $(BUILD_DIR)
+	sed '/^#[[:space:]]*syntax=/d' Dockerfile > $(BUILD_DIR)/Dockerfile.stock
+	DOCKER_BUILDKIT=1 docker build --platform $(PLATFORM) \
+		--build-arg AGENT_UID=$(AGENT_UID) \
+		--provenance=false --sbom=false \
+		--label org.opencontainers.image.source="$(SOURCE_URL)" \
+		--label org.opencontainers.image.revision="$(REVISION)" \
+		--label org.opencontainers.image.licenses="Apache-2.0" \
+		--label sh.brig.agent="$(AGENT)" \
+		--label sh.brig.agent.cli="$(CLI)" \
+		--label sh.brig.variant="stock" \
+		-t $(STOCK_IMAGE) -f $(BUILD_DIR)/Dockerfile.stock .
+
+# The mirror image of `check`: there, the microVM machinery must be present;
+# here it must be absent. Asserting the absence is the point of the variant --
+# an image that quietly kept a 50MB guest kernel would still run fine under
+# docker and nobody would notice.
+check-stock:
+	@echo "==> checking $(STOCK_IMAGE)"
+	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh --user root $(STOCK_IMAGE) -c '\
+		set -e; \
+		for p in /.boot/kernel /urunc.json /urunit /urunit-agent; do \
+			if [ -e "$$p" ]; then echo "stock image still carries $$p"; exit 1; fi; \
+		done; \
+		echo "ok: no kernel, no urunc.json, no urunit"'
+	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(STOCK_IMAGE) -c '\
+		set -e; command -v $(CLI) >/dev/null || { echo "$(CLI) not on the runtime user PATH"; exit 1; }; \
+		echo "ok: $(CLI) runnable as $$(id -un)"'
+	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(STOCK_IMAGE) -c '\
+		set -e; \
+		command -v node >/dev/null || { echo "node not on the runtime user PATH"; exit 1; }; \
+		command -v npx  >/dev/null || { echo "npx not on the runtime user PATH";  exit 1; }; \
+		echo "ok: node $$(node --version), npx $$(npx --version)"'
+
+push-stock:
+	docker save $(STOCK_IMAGE) -o $(BUILD_DIR)/stock.tar
+	crane push $(BUILD_DIR)/stock.tar $(STOCK_IMAGE)
+	rm -f $(BUILD_DIR)/stock.tar
 
 clean:
 	rm -rf $(BUILD_DIR)

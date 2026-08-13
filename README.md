@@ -43,6 +43,32 @@ Every image is credential-free by design. No key, no token and no session is
 baked into any of them. The agent authenticates at runtime and its state lands
 in the home directory, which is what brig persists for you.
 
+### Two variants of each
+
+Each agent is published twice, from the same Dockerfile:
+
+| | Image | What it is |
+| --- | --- | --- |
+| bootable | `ghcr.io/brig-sh/<agent>` | a microVM guest: guest kernel, `urunit`, urunc metadata. What brig boots. |
+| stock | `ghcr.io/brig-sh/<agent>-stock` | an ordinary container image: the same rootfs, none of the microVM machinery. |
+
+The stock variant is for the cases where a microVM is not what you want --
+running the agent under docker or podman, in a Kubernetes pod, in CI, or as a
+base to build your own guest image on. It is tens of megabytes smaller,
+because it carries no kernel.
+
+They are not two Dockerfiles. The `#syntax` line is stripped and the same file
+is built plainly, in the same CI job, on the same runner, against the same
+resolution of `ubuntu:24.04`. Two files, or even two jobs, could drift; this
+cannot. And `make check-stock` asserts the absence of `/.boot/kernel`,
+`/urunc.json` and `/urunit` rather than assuming it, because an image that
+quietly kept a 50MB kernel would still run fine under docker and nobody would
+notice.
+
+```bash
+docker run --rm -it ghcr.io/brig-sh/codex-stock codex --version
+```
+
 ### Cursor
 
 `images/cursor/` builds and is exercised on every pull request, but we do not

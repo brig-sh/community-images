@@ -290,6 +290,46 @@ jobs:
             "$IMAGE_REF@$DIGEST" > /dev/null
           echo "verified $IMAGE_REF@$DIGEST"
 
+      # The stock variant: the same Dockerfile with bunny's `#syntax` line
+      # stripped, so it produces an ordinary container image -- no guest
+      # kernel, no urunit, no urunc.json. Built in this job rather than its own
+      # so both variants provably come from one Dockerfile, one commit, one
+      # runner and one resolution of the ubuntu:24.04 base. Two jobs could
+      # silently disagree about any of those.
+      - name: Build and check ${{ matrix.image }}-stock
+        run: |
+          set -euo pipefail
+          echo "STOCK_REF=$REGISTRY/${{ matrix.image }}-stock:${{ matrix.arch }}" >> "$GITHUB_ENV"
+          make -C "images/${{ matrix.image }}" stock check-stock \
+            PLATFORM="linux/${{ matrix.arch }}" \
+            STOCK_IMAGE="$REGISTRY/${{ matrix.image }}-stock:${{ matrix.arch }}" \
+            REVISION="$GITHUB_SHA"
+
+      - name: Push ${{ matrix.image }}-stock
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          make -C "images/${{ matrix.image }}" push-stock STOCK_IMAGE="$STOCK_REF"
+          crane tag "$STOCK_REF" "${{ matrix.arch }}-${GITHUB_SHA::7}"
+          STOCK_DIGEST="$(crane digest "$STOCK_REF")"
+          echo "STOCK_DIGEST=$STOCK_DIGEST" >> "$GITHUB_ENV"
+          echo "published $STOCK_REF@$STOCK_DIGEST"
+
+      - name: Sign and attest ${{ matrix.image }}-stock
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$STOCK_REF@$STOCK_DIGEST"
+          syft "$STOCK_REF@$STOCK_DIGEST" -o spdx-json > sbom-stock.spdx.json
+          cosign attest --yes --type spdxjson \
+            --predicate sbom-stock.spdx.json "$STOCK_REF@$STOCK_DIGEST"
+          IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-images.yml@refs/"
+          cosign verify \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$STOCK_REF@$STOCK_DIGEST" > /dev/null
+          echo "verified $STOCK_REF@$STOCK_DIGEST"
+
       - name: Summary
         if: steps.mode.outputs.publish == 'true'
         run: |
@@ -297,6 +337,7 @@ jobs:
             echo "### ${{ matrix.image }} (${{ matrix.arch }})"
             echo
             echo '```'
+            echo "$STOCK_REF@$STOCK_DIGEST"
             echo "$IMAGE_REF@$DIGEST"
             echo "$REGISTRY/${{ matrix.image }}:${{ matrix.arch }}-${GITHUB_SHA::7}"
             echo '```'
@@ -364,20 +405,23 @@ jobs:
         if: steps.mode.outputs.publish == 'true'
         run: crane auth login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
 
-      - name: Assemble and sign the index
+      # One index per variant. Both are assembled the same way, so this is a
+      # loop rather than two near-identical blocks.
+      - name: Assemble and sign the indexes
         if: steps.mode.outputs.publish == 'true'
         run: |
           set -euo pipefail
-          REF="$REGISTRY/${{ matrix.image }}"
-          crane index append \
-            -m "$REF:arm64" -m "$REF:amd64" \
-            -t "$REF:latest"
-          DIGEST="$(crane digest "$REF:latest")"
-          cosign sign --yes "$REF@$DIGEST"
           IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-images.yml@refs/"
-          cosign verify \
-            --certificate-identity-regexp "$IDENTITY" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            "$REF@$DIGEST" > /dev/null
-          echo "index $REF:latest@$DIGEST"
-          crane manifest "$REF:latest" | jq -r '.manifests[] | "  \(.platform.os)/\(.platform.architecture) \(.digest)"'
+          for REF in "$REGISTRY/${{ matrix.image }}" "$REGISTRY/${{ matrix.image }}-stock"; do
+            crane index append \
+              -m "$REF:arm64" -m "$REF:amd64" \
+              -t "$REF:latest"
+            DIGEST="$(crane digest "$REF:latest")"
+            cosign sign --yes "$REF@$DIGEST"
+            cosign verify \
+              --certificate-identity-regexp "$IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$REF@$DIGEST" > /dev/null
+            echo "index $REF:latest@$DIGEST"
+            crane manifest "$REF:latest" | jq -r '.manifests[] | "  \(.platform.os)/\(.platform.architecture) \(.digest)"'
+          done
