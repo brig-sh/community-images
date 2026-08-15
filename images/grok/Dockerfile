@@ -48,7 +48,8 @@ RUN useradd -m -u ${AGENT_UID} -s /bin/bash grok \
 # warms the launcher's unpack of the platform binary while we are still root.
 # The chmod then keeps the unpacked artifacts readable for the unprivileged
 # runtime user, which is what actually runs the agent.
-ARG GROK_VERSION=1.0.0
+# Unpinned so a rebuild picks up the current CLI; set a version to pin.
+ARG GROK_VERSION=latest
 RUN npm install -g @xai-official/grok@${GROK_VERSION} \
  && npm cache clean --force \
  && rm -rf /root/.npm /tmp/* \
