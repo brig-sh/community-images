@@ -109,15 +109,24 @@ RUN useradd -m -u ${AGENT_UID} -s /bin/bash opencode \
 #
 # Installed to /usr/local/bin rather than the home directory, because a host
 # directory gets mounted over /home/opencode at boot.
-ARG OPENCODE_VERSION=1.18.16
+# "latest" resolves the newest release at build time; set an explicit version
+# to pin. See the codex image for the reasoning.
+ARG OPENCODE_VERSION=latest
 RUN arch="$(dpkg --print-architecture)" \
  && case "$arch" in \
       arm64) oarch=linux-arm64 ;; \
       amd64) oarch=linux-x64 ;; \
       *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
     esac \
+ && ver="$OPENCODE_VERSION" \
+ && if [ "$ver" = latest ]; then \
+      ver="$(curl -fsSL https://api.github.com/repos/sst/opencode/releases/latest \
+             | sed -n 's/.*"tag_name" *: *"v\([^"]*\)".*/\1/p' | head -1)"; \
+      [ -n "$ver" ] || { echo "could not resolve the latest opencode release" >&2; exit 1; }; \
+      echo "opencode: resolved latest to $ver"; \
+    fi \
  && curl -fsSL -o /tmp/opencode.tar.gz \
-      "https://github.com/sst/opencode/releases/download/v${OPENCODE_VERSION}/opencode-${oarch}.tar.gz" \
+      "https://github.com/sst/opencode/releases/download/v${ver}/opencode-${oarch}.tar.gz" \
  && mkdir -p /tmp/opencode-x && tar -xzf /tmp/opencode.tar.gz -C /tmp/opencode-x \
  && install -m 0755 /tmp/opencode-x/opencode /usr/local/bin/opencode \
  && rm -rf /tmp/opencode.tar.gz /tmp/opencode-x \
