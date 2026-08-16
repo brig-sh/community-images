@@ -81,8 +81,20 @@ define assert_toolchain
 		command -v cc  >/dev/null || { echo "no cc on the runtime user PATH"; exit 1; }; \
 		command -v make >/dev/null || { echo "no make on the runtime user PATH"; exit 1; }; \
 		command -v python3 >/dev/null || { echo "no python3"; exit 1; }; \
+		command -v gh >/dev/null || { echo "no gh on the runtime user PATH"; exit 1; }; \
+		command -v cargo >/dev/null || { echo "no cargo on the runtime user PATH"; exit 1; }; \
+		cargo clippy --version >/dev/null 2>&1 || { echo "clippy missing"; exit 1; }; \
+		cargo fmt --version    >/dev/null 2>&1 || { echo "rustfmt missing"; exit 1; }; \
 		sudo -n true 2>/dev/null || { echo "$$(id -un) cannot sudo without a password"; exit 1; }; \
-		echo "ok: $$(cc --version | head -1), $$(python3 --version), passwordless sudo"'
+		echo "ok: $$(cc --version | head -1), $$(python3 --version), $$(rustc --version), $$(gh --version | head -1), passwordless sudo"'
+	@# rustup writes into /usr/local/{rustup,cargo} whenever the agent adds a
+	@# target or component, so the unprivileged user needs write access there,
+	@# not merely read. Cheap to assert, and silent to get wrong.
+	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(1) -c '\
+		set -e; \
+		test -w /usr/local/cargo -a -w /usr/local/rustup \
+			|| { echo "$$(id -un) cannot write the rust toolchain dirs"; exit 1; }; \
+		echo "ok: rust toolchain writable by $$(id -un)"'
 endef
 
 # Resolved lazily: an explicit *_SRC wins, otherwise use the checkout that

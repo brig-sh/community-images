@@ -45,9 +45,20 @@ in the home directory, which is what brig persists for you.
 
 ### What is in them
 
-Ubuntu 24.04, the agent CLI, and enough to do real work with it: git, curl and
-the usual networking tools, node (the agents' skills and plugins shell out to
-it), a C toolchain, and python3 with venv and pip.
+Ubuntu 24.04, the agent CLI, and enough to do real work with it:
+
+| | |
+| --- | --- |
+| base | git, curl, wget, jq, and the usual networking tools |
+| node | 22 from NodeSource -- the agents' skills and plugins shell out to it |
+| C/C++ | `build-essential`, `pkg-config` |
+| Python | `python3` with `venv` and `pip` |
+| Rust | rustup under `/usr/local`, with `clippy` and `rustfmt` |
+| GitHub | `gh`, from GitHub's signed apt repo |
+
+Rust is the expensive one -- it roughly triples the image. If that matters more
+to you than having it preinstalled, build your own without it: the Dockerfiles
+are small and the rustup stanza is one block to delete.
 
 The agent user also has **passwordless `sudo`**, so the agent can install
 whatever a task turns out to need:

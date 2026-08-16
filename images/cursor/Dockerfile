@@ -41,6 +41,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo build-essential pkg-config python3 python3-venv python3-pip \
  && rm -rf /var/lib/apt/lists/*
 
+# The GitHub CLI, from GitHub's own signed apt repo rather than a release
+# tarball, so apt keeps it current alongside everything else. The keyring is
+# fetched fail-closed (a bad download aborts the layer), and the repo's arch
+# comes from dpkg so one line resolves on both arm64 and amd64.
+RUN install -m 0755 -d /usr/share/keyrings \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && chmod 0644 /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/* \
+ && gh --version
+
+# Rust, via rustup, under /usr/local rather than a home directory -- a host
+# directory is mounted over the agent's home at boot and would hide it.
+#
+# The minimal profile plus clippy and rustfmt: an agent writing Rust reaches
+# for `cargo clippy` and `cargo fmt` immediately, while the offline docs the
+# default profile installs are dead weight in a sandbox.
+#
+# a+rwX, not a+rX, because the agent runs unprivileged and rustup writes into
+# these trees whenever it adds a target or a component.
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+RUN curl -fsSL https://sh.rustup.rs \
+      | sh -s -- -y --no-modify-path --profile minimal -c clippy -c rustfmt \
+ && chmod -R a+rwX /usr/local/rustup /usr/local/cargo \
+ && rustc --version && cargo --version && cargo clippy --version
+
 # node, for the agent's own extensions rather than for the CLI itself. Skills
 # and plugins routinely shell out to node or npx -- installing a Claude Code
 # plugin runs npm behind the scenes -- and a guest without them fails at the

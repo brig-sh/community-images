@@ -11,8 +11,8 @@ building a guest image from scratch, and running a plain container image.
 
 The quickest path. Our images carry TLS roots, curl, git, a few networking
 tools, the agent CLI, node for the agents' own skills and plugins, a C
-toolchain, python3 with venv and pip, and passwordless `sudo` for the agent
-user.
+toolchain, python3 with venv and pip, Rust with clippy and rustfmt, `gh`, and
+passwordless `sudo` for the agent user.
 
 That last part matters more than it sounds. The agent can `apt-get install`
 whatever a task turns out to need, at runtime, without a derived image at all:
@@ -29,7 +29,7 @@ FROM ghcr.io/brig-sh/claude-code:arm64
 
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    golang rustc \
+    golang openjdk-21-jdk-headless \
  && rm -rf /var/lib/apt/lists/*
 USER claude
 ```
