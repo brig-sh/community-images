@@ -70,6 +70,21 @@ BUILD_DIR   := dist
 # staged. The mechanism that does work is a COPY over /.boot/kernel in the
 # overlay.
 
+# Both variants have to be able to build code and install packages, so both
+# assert it the same way. Run as the image's own unprivileged user, because
+# that is who the agent is: a toolchain only root can reach is no toolchain,
+# and `sudo -n` proves the agent can install without being prompted for a
+# password it does not have.
+define assert_toolchain
+	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(1) -c '\
+		set -e; \
+		command -v cc  >/dev/null || { echo "no cc on the runtime user PATH"; exit 1; }; \
+		command -v make >/dev/null || { echo "no make on the runtime user PATH"; exit 1; }; \
+		command -v python3 >/dev/null || { echo "no python3"; exit 1; }; \
+		sudo -n true 2>/dev/null || { echo "$$(id -un) cannot sudo without a password"; exit 1; }; \
+		echo "ok: $$(cc --version | head -1), $$(python3 --version), passwordless sudo"'
+endef
+
 # Resolved lazily: an explicit *_SRC wins, otherwise use the checkout that
 # the `sources` target clones into dist/src.
 urunc_src   = $(if $(URUNC_SRC),$(abspath $(URUNC_SRC)),$(CURDIR)/$(BUILD_DIR)/src/urunc)
@@ -173,6 +188,7 @@ check:
 		command -v node >/dev/null || { echo "node not on the runtime user PATH"; exit 1; }; \
 		command -v npx  >/dev/null || { echo "npx not on the runtime user PATH";  exit 1; }; \
 		echo "ok: node $$(node --version), npx $$(npx --version)"'
+	$(call assert_toolchain,$(IMAGE))
 	@# If a kernel was staged for this build, the image must actually be
 	@# carrying it. Asserting only that /.boot/kernel is non-empty is not
 	@# enough: a staged kernel that never lands leaves bunny's default in
@@ -238,6 +254,7 @@ check-stock:
 		command -v node >/dev/null || { echo "node not on the runtime user PATH"; exit 1; }; \
 		command -v npx  >/dev/null || { echo "npx not on the runtime user PATH";  exit 1; }; \
 		echo "ok: node $$(node --version), npx $$(npx --version)"'
+	$(call assert_toolchain,$(STOCK_IMAGE))
 
 push-stock:
 	docker save $(STOCK_IMAGE) -o $(BUILD_DIR)/stock.tar

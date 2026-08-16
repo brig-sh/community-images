@@ -13,14 +13,24 @@
 FROM ubuntu:24.04
 
 # The shared base every agent image in this repo starts from: TLS roots, a
-# fetcher, git, and enough networking tooling to diagnose the guest from
-# inside it, plus the node runtime installed below. Still no compiler and no
-# second language runtime -- "minimal Linux + the agent CLI, and what the
-# agent's own extensions need" is the contract here. Layering more on top is
-# a two-line derived image; see docs/bring-your-own-image.md.
+# fetcher, git, enough networking tooling to diagnose the guest from inside
+# it, and a working toolchain.
+#
+# The toolchain is not decoration. An agent asked to fix a bug will try to
+# build and test the thing it just edited, and a guest with no cc(1) fails at
+# that point with an error about the project rather than about the image.
+# python3 with venv and pip for the same reason.
+#
+# sudo is passwordless for the agent user, so it can apt-get install whatever
+# the task turns out to need. That is not a hole in the sandbox: the boundary
+# here is the VM, not the user account inside it, and an agent that cannot
+# install a missing header is an agent that stops halfway through the job. The
+# stock container variant inherits this too, which is worth knowing if you run
+# it somewhere the container boundary *is* your boundary.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl wget git bash procps less file jq unzip \
     net-tools iproute2 iputils-ping dnsutils \
+    sudo build-essential pkg-config python3 python3-venv python3-pip \
  && rm -rf /var/lib/apt/lists/*
 
 # node, for the agent's own extensions rather than for the CLI itself. Skills
@@ -39,7 +49,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
 # carry the host user's ownership and stay writable from both sides.
 ARG AGENT_UID=501
 RUN useradd -m -u ${AGENT_UID} -s /bin/bash codex \
- && mkdir -p /work && chown codex:codex /work
+ && mkdir -p /work && chown codex:codex /work \
+ && printf 'codex ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/codex \
+ && chmod 0440 /etc/sudoers.d/codex
 
 # Codex ships a static musl binary per release, so the CLI itself needs
 # nothing from the node installed above. Installed to /usr/local/bin rather

@@ -9,17 +9,27 @@ building a guest image from scratch, and running a plain container image.
 
 ## Layering on one of ours
 
-The quickest path. Our images are deliberately minimal -- TLS roots, curl,
-git, a few networking tools, the agent CLI, and node, which the agents' own
-skills and plugins expect. No compiler, and no second language runtime. If
-your work needs a toolchain, add it.
+The quickest path. Our images carry TLS roots, curl, git, a few networking
+tools, the agent CLI, node for the agents' own skills and plugins, a C
+toolchain, python3 with venv and pip, and passwordless `sudo` for the agent
+user.
+
+That last part matters more than it sounds. The agent can `apt-get install`
+whatever a task turns out to need, at runtime, without a derived image at all:
+
+```console
+$ sudo apt-get update && sudo apt-get install -y libpq-dev
+```
+
+So reach for a derived image when you want something baked in -- pinned, and
+there on every boot rather than re-installed each session:
 
 ```dockerfile
 FROM ghcr.io/brig-sh/claude-code:arm64
 
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential python3 python3-venv \
+    golang rustc \
  && rm -rf /var/lib/apt/lists/*
 USER claude
 ```

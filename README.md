@@ -43,6 +43,25 @@ Every image is credential-free by design. No key, no token and no session is
 baked into any of them. The agent authenticates at runtime and its state lands
 in the home directory, which is what brig persists for you.
 
+### What is in them
+
+Ubuntu 24.04, the agent CLI, and enough to do real work with it: git, curl and
+the usual networking tools, node (the agents' skills and plugins shell out to
+it), a C toolchain, and python3 with venv and pip.
+
+The agent user also has **passwordless `sudo`**, so the agent can install
+whatever a task turns out to need:
+
+```console
+$ sudo apt-get update && sudo apt-get install -y libpq-dev
+```
+
+That is deliberate. The sandbox boundary is the VM, not the user account
+inside it, and an agent that cannot install a missing header is an agent that
+stops halfway through the job. Worth knowing if you run the stock variant
+somewhere the *container* boundary is your boundary, because it inherits the
+same sudoers rule.
+
 ### Two variants of each
 
 Each agent is published twice, from the same Dockerfile:
