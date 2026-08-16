@@ -176,9 +176,9 @@ jobs:
         run: |
           set -euo pipefail
           REF="$REGISTRY/kernel"
-          cosign sign --yes "$REF@$DIGEST"
+          .github/scripts/retry.sh cosign sign --yes "$REF@$DIGEST"
           IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-kernel.yml@refs/"
-          cosign verify \
+          .github/scripts/retry.sh cosign verify \
             --certificate-identity-regexp "$IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$REF@$DIGEST" > /dev/null

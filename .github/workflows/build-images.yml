@@ -261,7 +261,7 @@ jobs:
       # lands in Sigstore's transparency log.
       - name: Sign ${{ matrix.image }}
         if: steps.mode.outputs.publish == 'true'
-        run: cosign sign --yes "$IMAGE_REF@$DIGEST"
+        run: .github/scripts/retry.sh cosign sign --yes "$IMAGE_REF@$DIGEST"
 
       # SBOM over what was actually published, read back from the registry
       # rather than from the local build, then attached as a signed
@@ -271,7 +271,7 @@ jobs:
         run: |
           set -euo pipefail
           syft "$IMAGE_REF@$DIGEST" -o spdx-json > sbom.spdx.json
-          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$IMAGE_REF@$DIGEST"
+          .github/scripts/retry.sh cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$IMAGE_REF@$DIGEST"
 
       # Verify from the outside, in the same run: if this fails, the artifact
       # is not usable by the verification instructions we publish.
@@ -280,11 +280,11 @@ jobs:
         run: |
           set -euo pipefail
           IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-images.yml@refs/"
-          cosign verify \
+          .github/scripts/retry.sh cosign verify \
             --certificate-identity-regexp "$IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$IMAGE_REF@$DIGEST" > /dev/null
-          cosign verify-attestation --type spdxjson \
+          .github/scripts/retry.sh cosign verify-attestation --type spdxjson \
             --certificate-identity-regexp "$IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$IMAGE_REF@$DIGEST" > /dev/null
@@ -319,12 +319,12 @@ jobs:
         if: steps.mode.outputs.publish == 'true'
         run: |
           set -euo pipefail
-          cosign sign --yes "$STOCK_REF@$STOCK_DIGEST"
+          .github/scripts/retry.sh cosign sign --yes "$STOCK_REF@$STOCK_DIGEST"
           syft "$STOCK_REF@$STOCK_DIGEST" -o spdx-json > sbom-stock.spdx.json
-          cosign attest --yes --type spdxjson \
+          .github/scripts/retry.sh cosign attest --yes --type spdxjson \
             --predicate sbom-stock.spdx.json "$STOCK_REF@$STOCK_DIGEST"
           IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-images.yml@refs/"
-          cosign verify \
+          .github/scripts/retry.sh cosign verify \
             --certificate-identity-regexp "$IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$STOCK_REF@$STOCK_DIGEST" > /dev/null
@@ -417,8 +417,8 @@ jobs:
               -m "$REF:arm64" -m "$REF:amd64" \
               -t "$REF:latest"
             DIGEST="$(crane digest "$REF:latest")"
-            cosign sign --yes "$REF@$DIGEST"
-            cosign verify \
+            .github/scripts/retry.sh cosign sign --yes "$REF@$DIGEST"
+            .github/scripts/retry.sh cosign verify \
               --certificate-identity-regexp "$IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
               "$REF@$DIGEST" > /dev/null
