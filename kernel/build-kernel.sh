@@ -30,12 +30,62 @@
 # Silicon Mac as in CI. Building the amd64 profile on an arm64 host works but
 # is emulated and slow; CI runs each profile on a native runner.
 #
+# The kernel tarball is checked against a recorded sha256 before anything
+# unpacks it -- see the KVER_SHA256 note below for why a digest and not a
+# signature.
+#
 # A cold build is tens of minutes. $CCACHE_DIR is reused across runs, and CI
 # caches it, so iterating is much cheaper than the first time.
 set -euo pipefail
 
 PROFILE="${PROFILE:-arm64}"
-KVER="${KVER:-6.12.95}"                 # 6.12 LTS, pinned; bump deliberately
+
+# The kernel version and its digest: one pin written on two lines, and they
+# move together. KVER_SHA256 is the sha256 of linux-$KVER.tar.xz as kernel.org
+# publishes it, and the build below refuses to unpack a tarball that does not
+# match it.
+#
+# Until this existed the tarball was fetched over TLS and extracted unchecked,
+# which meant the signature this repo makes over the published kernel attested
+# bytes of unverified origin: a mirror, a proxy or anything else holding that
+# connection could have chosen the kernel every agent boots on, and the
+# signature would still have verified. A signature says who built an artifact,
+# never what went into it.
+#
+# A recorded digest rather than a `gpg --verify` of kernel.org's
+# sha256sums.asc, on purpose. The signature chain needs the Linux Foundation
+# and Greg KH release keys, which means either carrying keyring bytes in this
+# repo or fetching them from a keyserver during the build -- a second network
+# dependency that fails on its own schedule and would take the kernel build
+# down with it. A digest needs nothing but the tarball, is reviewable in the
+# diff of the commit that bumps it, and pins exactly one artifact. Verify the
+# chain by hand at the moment you bump, which is the moment a human is looking
+# anyway:
+#
+#   curl -fsSLO https://cdn.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc
+#   gpg --verify sha256sums.asc          # LF / Greg KH release key
+#   grep "linux-<new-KVER>.tar.xz" sha256sums.asc
+#
+# and paste what that prints below, in the same commit as the KVER bump.
+#
+# hull-assets/PINS records the same two values for the boot-bundle kernel.
+# Nothing compares them for you, so keep them in step when either moves.
+KVER_PINNED=6.12.95                     # 6.12 LTS, pinned; bump deliberately
+KVER_PINNED_SHA256=a9e8c51fcb1e695d1d35dde5886cba579cb6f29c9646c5889f39d63841d4b9f6
+
+KVER="${KVER:-$KVER_PINNED}"
+# Overriding the version alone is refused rather than quietly left unchecked:
+# it would fetch one kernel and check it against another kernel's digest, which
+# is either a baffling failure or -- once someone "fixes" it by dropping the
+# check -- no check at all. Pointing this build at a different kernel is a
+# thing you should have to say twice.
+if [ "$KVER" != "$KVER_PINNED" ] && [ -z "${KVER_SHA256:-}" ]; then
+  echo "!! KVER was overridden to '$KVER' without a matching KVER_SHA256." >&2
+  echo "   Set both, or bump both together above. See the note there." >&2
+  exit 1
+fi
+KVER_SHA256="${KVER_SHA256:-$KVER_PINNED_SHA256}"
+
 OUT="${OUT:-$(pwd)/dist}"
 CCACHE_DIR="${CCACHE_DIR:-${TMPDIR:-/tmp}/brig-kernel-ccache}"
 BUILDER_IMG="${BUILDER_IMG:-debian:bookworm-slim}"
@@ -109,7 +159,7 @@ mkdir -p "$OUT" "$CCACHE_DIR"
 echo ">> building Linux $KVER kernel ($PROFILE profile, $PLATFORM, $JOBS jobs)"
 
 docker run --rm --platform "$PLATFORM" \
-  -e KVER="$KVER" -e JOBS="$JOBS" -e KARCH="$KARCH" \
+  -e KVER="$KVER" -e KVER_SHA256="$KVER_SHA256" -e JOBS="$JOBS" -e KARCH="$KARCH" \
   -e MAKE_TARGET="$MAKE_TARGET" -e BUILT="$BUILT" \
   -e REQUIRED_Y="$REQUIRED_Y" -e MAX_IMAGE_MB="$MAX_IMAGE_MB" \
   -v "$OUT":/out -v "$CCACHE_DIR":/ccache \
@@ -129,6 +179,22 @@ docker run --rm --platform "$PLATFORM" \
     # An exact tarball, not a git branch: a branch moves under you, and this
     # repo pins everything else it installs.
     wget -q "https://cdn.kernel.org/pub/linux/kernel/$SER/linux-$KVER.tar.xz"
+
+    # Verify BEFORE unpacking, not after. Everything downstream -- the .config
+    # gates, the BTF check, the boot magic, the signature the workflow makes
+    # over the published artifact -- describes whatever came out of this
+    # tarball, so this is the last point at which the identity of the source can
+    # still be established. A mismatch is fatal and prints both digests, because
+    # the usual cause is a KVER bump whose KVER_SHA256 did not come with it.
+    echo "$KVER_SHA256  linux-$KVER.tar.xz" > linux.sha256
+    if ! sha256sum -c linux.sha256; then
+      echo "!! linux-$KVER.tar.xz does not match the pinned digest" >&2
+      echo "   expected: $KVER_SHA256" >&2
+      echo "   got:      $(sha256sum "linux-$KVER.tar.xz" | cut -d" " -f1)" >&2
+      echo "   refusing to build a kernel from an unverified tarball" >&2
+      exit 3
+    fi
+
     tar -xf "linux-$KVER.tar.xz"
     cd "linux-$KVER"
 

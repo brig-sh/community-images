@@ -13,7 +13,9 @@
 #   URUNC_SRC   a urunc checkout at the commit URUNC_REF pins, which is where
 #               cmd/urunit-agent lives (nofireai/urunc_fork). That commit is
 #               shared with hull and hull-assets -- see the note on URUNC_REF.
-#   URUNIT_SRC  a urunit checkout with the controlling-tty fix
+#   URUNIT_SRC  a urunit checkout at the commit URUNIT_REF pins, which carries
+#               the controlling-tty and reaping fixes. That commit is shared
+#               with hull-assets -- see the note on URUNIT_REF.
 #
 # Leave them unset and `make build` clones both into dist/src itself.
 #
@@ -81,10 +83,23 @@ URUNC_REPO  ?= https://github.com/nofireai/urunc_fork
 URUNC_REF   ?= 770a319bb02583b93116f3083ca020cbeb216706
 
 URUNIT_REPO ?= https://github.com/NOFireAI/urunit
-# Still a branch. hull-assets/PINS pins the commit (URUNIT_REF) and explains why
-# it is not on main yet; worth pinning here too, and not part of the urunc
-# three-way contract above.
-URUNIT_REF  ?= fix/controlling-tty
+# A commit, for the same reason URUNC_REF is one: this is PID 1 in every
+# published, signed guest image, and while it was a branch two builds of the
+# same commit of this repository could ship two different inits.
+#
+# It is the commit hull-assets/PINS pins as URUNIT_REF:
+#
+#   hull-assets/PINS  URUNIT_REF
+#
+# On fix/controlling-tty rather than main on purpose -- main has neither the
+# controlling-terminal fix nor the reaping fix this path needs, so a guest
+# whose entrypoint exits would hang instead of powering off. Move both sides to
+# main once those land there, in one change.
+#
+# Not part of the urunc three-way contract above, and note that nothing checks
+# this one for you: hull-assets' ci/check-pin-coherence.sh compares URUNC_REF
+# across the three repositories and does not look at URUNIT_REF at all.
+URUNIT_REF  ?= 40a8bbe594a8e738d29b790d44292c38182a8099
 
 BUILD_DIR   := dist
 
@@ -140,11 +155,11 @@ build: base binaries overlay
 # 0. guest-init sources, unless the caller pointed at their own checkouts.
 #
 # `git init` + `fetch --depth 1 <ref>` rather than `clone --depth 1 -b <ref>`:
-# -b takes a branch or a tag and refuses a commit, so a pinned URUNC_REF could
-# not be checked out at all with the previous form -- which is the mechanical
-# reason this stayed on a floating branch. The fetch form takes a commit or a
-# branch name equally, so URUNIT_REF keeps working unchanged and can be pinned
-# whenever its own fix lands.
+# -b takes a branch or a tag and refuses a commit, so neither ref could be
+# checked out at all with the previous form -- which is the mechanical reason
+# they stayed on floating branches. The fetch form takes a commit or a branch
+# name equally; both are commits now, and a branch would still work if one ever
+# had to go back to being one.
 define clone_at
 	git init -q $(2) && \
 	git -C $(2) remote add origin $(1) && \
