@@ -126,14 +126,22 @@ log. To check a signature is really ours:
 ```bash
 cosign verify \
   --certificate-identity-regexp \
-    '^https://github.com/brig-sh/community-images/.github/workflows/build-images.yml@refs/' \
+    '^https://github\.com/brig-sh/community-images/\.github/workflows/build-images\.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/brig-sh/claude-code
 ```
 
 That command is the interesting one. It does not ask "was this signed?" -- it
-asks "was this built by that workflow, in that repo?". A signature from
-anywhere else fails it.
+asks "was this built by that workflow, in that repo, on main?". A signature
+from anywhere else fails it.
+
+The regexp is fussy on purpose, and both details are load-bearing. The dots
+are escaped, so `build-images\.yml` matches that file and not a file named
+something one character away from it. And it ends at `refs/heads/main$`, so a
+certificate minted from a branch or from a pull request does not satisfy it --
+without that anchor the command would accept anything anyone could get to run
+in this repository, which is a much weaker claim than the one it looks like it
+is making. Copy it exactly.
 
 Each image also carries an SPDX SBOM as a signed attestation, so you can see
 the packages inside before you boot it:
@@ -141,7 +149,7 @@ the packages inside before you boot it:
 ```bash
 cosign verify-attestation --type spdxjson \
   --certificate-identity-regexp \
-    '^https://github.com/brig-sh/community-images/.github/workflows/build-images.yml@refs/' \
+    '^https://github\.com/brig-sh/community-images/\.github/workflows/build-images\.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/brig-sh/claude-code \
   | jq -r '.payload | @base64d | fromjson | .predicate.name'

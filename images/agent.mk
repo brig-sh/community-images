@@ -10,8 +10,9 @@
 # than vendored, so an image always ships the current agent-capable init.
 # Both sources are public, so nothing here needs credentials:
 #
-#   URUNC_SRC   a urunc checkout on the darwin/converge line, which is where
-#               cmd/urunit-agent lives (nofireai/urunc_fork)
+#   URUNC_SRC   a urunc checkout at the commit URUNC_REF pins, which is where
+#               cmd/urunit-agent lives (nofireai/urunc_fork). That commit is
+#               shared with hull and hull-assets -- see the note on URUNC_REF.
 #   URUNIT_SRC  a urunit checkout with the controlling-tty fix
 #
 # Leave them unset and `make build` clones both into dist/src itself.
@@ -54,8 +55,35 @@ REVISION    ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 URUNC_SRC   ?=
 URUNIT_SRC  ?=
 URUNC_REPO  ?= https://github.com/nofireai/urunc_fork
-URUNC_REF   ?= darwin/converge
+
+# URUNC_REF is a commit, and it is the same commit two other repositories pin:
+#
+#   hull/go.mod       replace github.com/urunc-dev/urunc => .../urunc_fork
+#                     v0.7.1-0.20260817061214-770a319bb025
+#   hull-assets/PINS  URUNC_REF
+#
+# Bump all three in one change. They are one pin written down three times
+# because three different things are built from it, and the agent wire protocol
+# is a contract between them: the urunit-agent compiled in here has to speak
+# what hull's exec path expects, and what the boot bundle's initrd carries.
+#
+# This was a floating branch (darwin/converge) while the other two were on a
+# commit -- and on a different line entirely, so the agent baked into every
+# published, signed guest image was built from source that hull had never been
+# compiled against. hull-assets/PINS describes what that looks like from the
+# outside: a guest that boots and then refuses to exec. Nothing about the
+# signature on those images was wrong; a signature says who built an artifact,
+# not that it agrees with the one next to it.
+#
+# hull-assets' ci/check-pin-coherence.sh compares the three and fails on
+# divergence, so a bump that misses one of them stops being something you find
+# out about from a guest.
+URUNC_REF   ?= 770a319bb02583b93116f3083ca020cbeb216706
+
 URUNIT_REPO ?= https://github.com/NOFireAI/urunit
+# Still a branch. hull-assets/PINS pins the commit (URUNIT_REF) and explains why
+# it is not on main yet; worth pinning here too, and not part of the urunc
+# three-way contract above.
 URUNIT_REF  ?= fix/controlling-tty
 
 BUILD_DIR   := dist
@@ -110,11 +138,25 @@ all: build check push
 build: base binaries overlay
 
 # 0. guest-init sources, unless the caller pointed at their own checkouts.
+#
+# `git init` + `fetch --depth 1 <ref>` rather than `clone --depth 1 -b <ref>`:
+# -b takes a branch or a tag and refuses a commit, so a pinned URUNC_REF could
+# not be checked out at all with the previous form -- which is the mechanical
+# reason this stayed on a floating branch. The fetch form takes a commit or a
+# branch name equally, so URUNIT_REF keeps working unchanged and can be pinned
+# whenever its own fix lands.
+define clone_at
+	git init -q $(2) && \
+	git -C $(2) remote add origin $(1) && \
+	git -C $(2) fetch -q --depth 1 origin $(3) && \
+	git -C $(2) checkout -q FETCH_HEAD
+endef
+
 sources:
 	@test -n "$(URUNC_SRC)"  || test -d "$(urunc_src)"  || \
-		git clone --depth 1 -b $(URUNC_REF) $(URUNC_REPO) $(urunc_src)
+		{ $(call clone_at,$(URUNC_REPO),$(urunc_src),$(URUNC_REF)); }
 	@test -n "$(URUNIT_SRC)" || test -d "$(urunit_src)" || \
-		git clone --depth 1 -b $(URUNIT_REF) $(URUNIT_REPO) $(urunit_src)
+		{ $(call clone_at,$(URUNIT_REPO),$(urunit_src),$(URUNIT_REF)); }
 
 # 1. bunny base image. The #syntax line in the Dockerfile makes BuildKit
 #    package the result as a bootable image: guest kernel under /.boot,

@@ -50,7 +50,7 @@ For an agent we do not ship, copy the closest `images/<agent>/` directory and
 replace the install stanza. The skeleton is:
 
 ```dockerfile
-#syntax=harbor.nbfc.io/nubificus/bunny:latest
+#syntax=harbor.nbfc.io/nubificus/bunny:latest@sha256:f4e9d86375f6975600d3c569a717ee9c6b2d9d5f607ad1d4a49daa05d8cf3893
 
 FROM ubuntu:24.04
 
@@ -72,6 +72,13 @@ CMD ["/bin/bash"]
 The `#syntax` line is what makes this bootable. It swaps in
 [bunny](https://github.com/nubificus/bunny) as the BuildKit frontend, which
 adds a guest kernel under `/.boot` and the urunc metadata in `/urunc.json`.
+
+Note the digest. A frontend is not a base image you inspect afterwards -- it
+is the program that decides what your image contains, so `:latest` on its own
+means your build output is whatever that tag pointed at on the day you ran it.
+Ours are pinned the same way. Resolve a current digest with
+`crane digest harbor.nbfc.io/nubificus/bunny:latest` and bump it when you mean
+to.
 
 Then overlay the guest init on top, which is what `Dockerfile.overlay` and
 `images/agent.mk` do for you:
