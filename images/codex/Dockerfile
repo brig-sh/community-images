@@ -1,4 +1,20 @@
-#syntax=harbor.nbfc.io/nubificus/bunny:latest
+#syntax=harbor.nbfc.io/nubificus/bunny:latest@sha256:f4e9d86375f6975600d3c569a717ee9c6b2d9d5f607ad1d4a49daa05d8cf3893
+
+# Pinned by digest, not by :latest.
+#
+# This line is not a base image, it is the BuildKit frontend: BuildKit fetches
+# it and hands it this Dockerfile, and whatever comes back decides what the
+# resulting image contains. It is arbitrary code with total authority over the
+# artifact, pulled from a registry that is neither GitHub nor Sigstore, and
+# :latest is a tag whoever controls that registry can move at any time.
+#
+# The signature does not cover this. Signing attests who built the image and
+# from which workflow -- never what went into it -- so an image built by a
+# swapped frontend signs cleanly, verifies cleanly, and contains whatever the
+# frontend decided to put there.
+#
+# Bump deliberately, and resolve the digest rather than copying one:
+#   crane digest harbor.nbfc.io/nubificus/bunny:latest
 
 # Codex (OpenAI) in a bootable guest image.
 #

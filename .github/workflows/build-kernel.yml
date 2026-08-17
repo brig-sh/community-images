@@ -92,11 +92,11 @@ jobs:
       matrix:
         profile: ${{ fromJSON(needs.select.outputs.profiles) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       # A cold kernel build is tens of minutes; with a warm ccache it is a few.
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .ccache
           key: kbuild-${{ matrix.profile }}-${{ hashFiles('kernel/build-kernel.sh') }}
@@ -116,7 +116,7 @@ jobs:
           ls -l dist/kernel
           echo "config delta: $(grep -c '^[+-]' dist/config.diff || true) lines"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: kernel-${{ matrix.profile }}
           path: |
