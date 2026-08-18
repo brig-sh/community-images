@@ -279,10 +279,19 @@ jobs:
         run: |
           set -euo pipefail
           make -C "images/${{ matrix.image }}" push IMAGE="$IMAGE_REF"
-          # An immutable alias next to the moving per-arch tag, so a consumer
-          # can pin a build without pinning a digest by hand.
+          # A per-commit alias next to the moving per-arch tag, so a consumer
+          # can pin a build without copying a digest by hand. Note it is an
+          # ordinary GHCR tag and therefore mutable like any other -- it is an
+          # alias, not a guarantee; only the digest is immutable.
           crane tag "$IMAGE_REF" "${{ matrix.arch }}-${GITHUB_SHA::7}"
-          DIGEST="$(crane digest "$IMAGE_REF")"
+
+          # Resolve through the per-commit alias, not through the moving
+          # per-arch tag. `crane digest "$IMAGE_REF"` asked the registry what
+          # :arm64 points at *now*, which is a different question from "what
+          # did this job just push": a concurrent publish between the push and
+          # this line, and the digest signed below is somebody else's build.
+          # The alias was set from this job's own push one line ago.
+          DIGEST="$(crane digest "$REGISTRY/${{ matrix.image }}:${{ matrix.arch }}-${GITHUB_SHA::7}")"
           echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
           echo "published $IMAGE_REF@$DIGEST"
 

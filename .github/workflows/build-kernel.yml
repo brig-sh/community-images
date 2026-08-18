@@ -177,7 +177,15 @@ jobs:
           set -euo pipefail
           REF="$REGISTRY/kernel"
           .github/scripts/retry.sh cosign sign --yes "$REF@$DIGEST"
-          IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-kernel.yml@refs/"
+          # Anchored at both ends, every dot escaped, and confined to main.
+          # This read "...build-kernel.yml@refs/" with unescaped dots: no
+          # terminal anchor, so refs/pull/<n>/merge and refs/heads/<anything>
+          # satisfied it, and this workflow carries id-token: write and runs on
+          # pull_request -- so a certificate that met it was obtainable from a
+          # PR branch. The dots matter too: unescaped, "github.com" also
+          # matches "githubXcom". The sibling build-images.yml fixed exactly
+          # this and explains why, forty lines away.
+          IDENTITY="^https://github\\.com/brig-sh/community-images/\\.github/workflows/build-kernel\\.yml@refs/heads/main$"
           .github/scripts/retry.sh cosign verify \
             --certificate-identity-regexp "$IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
