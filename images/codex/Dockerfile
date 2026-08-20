@@ -107,15 +107,26 @@ RUN useradd -m -u ${AGENT_UID} -s /bin/bash codex \
 #
 # The asset name is a Rust target triple; map the dpkg architecture onto it
 # so one Dockerfile covers both. Pinned -- bump deliberately.
-ARG CODEX_VERSION=0.147.0
+# "latest" resolves the newest release at build time; set an explicit version
+# to pin. Unpinned by default so a rebuild picks up the current CLI -- the
+# whole point of rebuilding these images -- and the resolved version is echoed
+# into the log so a build can still be traced back to what it installed.
+ARG CODEX_VERSION=latest
 RUN arch="$(dpkg --print-architecture)" \
  && case "$arch" in \
       arm64) rarch=aarch64 ;; \
       amd64) rarch=x86_64 ;; \
       *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
     esac \
+ && ver="$CODEX_VERSION" \
+ && if [ "$ver" = latest ]; then \
+      ver="$(curl -fsSL https://api.github.com/repos/openai/codex/releases/latest \
+             | sed -n 's/.*"tag_name" *: *"rust-v\([^"]*\)".*/\1/p' | head -1)"; \
+      [ -n "$ver" ] || { echo "could not resolve the latest codex release" >&2; exit 1; }; \
+      echo "codex: resolved latest to $ver"; \
+    fi \
  && curl -fsSL -o /tmp/codex.tar.gz \
-      "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-${rarch}-unknown-linux-musl.tar.gz" \
+      "https://github.com/openai/codex/releases/download/rust-v${ver}/codex-${rarch}-unknown-linux-musl.tar.gz" \
  && mkdir -p /tmp/codex-x && tar -xzf /tmp/codex.tar.gz -C /tmp/codex-x \
  && install -m 0755 /tmp/codex-x/codex* /usr/local/bin/codex \
  && rm -rf /tmp/codex.tar.gz /tmp/codex-x \

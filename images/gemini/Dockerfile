@@ -105,7 +105,8 @@ RUN useradd -m -u ${AGENT_UID} -s /bin/bash gemini \
 # The trailing --version doubles as the install's own sanity check, and the
 # chmod keeps the tree readable for the unprivileged runtime user: npm
 # installs as root here, and the guest does not run as root.
-ARG GEMINI_VERSION=0.55.1
+# Unpinned so a rebuild picks up the current CLI; set a version to pin.
+ARG GEMINI_VERSION=latest
 RUN npm install -g @google/gemini-cli@${GEMINI_VERSION} \
  && npm cache clean --force \
  && rm -rf /root/.npm /tmp/* \
