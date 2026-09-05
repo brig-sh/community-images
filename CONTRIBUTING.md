@@ -85,3 +85,7 @@ Support is not exhaustive and we do not claim it is. If an image here breaks,
 we want to know. If an agent we do not ship does not work, that is a
 bring-your-own-image question -- see
 [docs/bring-your-own-image.md](docs/bring-your-own-image.md).
+
+## AI policy
+
+AI-assisted development is welcome in community-images. See [AI_POLICY.md](AI_POLICY.md).
