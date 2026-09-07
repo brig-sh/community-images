@@ -28,7 +28,7 @@ make build check
 `check` asserts the image has a guest kernel, its urunc metadata, both guest
 binaries, and a `cursor-agent` the unprivileged user can run.
 
-Pinned at `CURSOR_VERSION=2026.08.11-e8db854`. Bump it deliberately, in a pull request -- CI
+Pinned at `CURSOR_VERSION=2026.09.02-c22c1a3`. Bump it deliberately, in a pull request -- CI
 builds the new version and runs it before anything reaches the registry.
 
 See the [top-level README](../../README.md) for the knobs, how the two build

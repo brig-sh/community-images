@@ -26,8 +26,10 @@ make build check
 `check` asserts the image has a guest kernel, its urunc metadata, both guest
 binaries, and a `opencode` the unprivileged user can run.
 
-Pinned at `OPENCODE_VERSION=1.18.16`. Bump it deliberately, in a pull request -- CI
-builds the new version and runs it before anything reaches the registry.
+Tracks the current release: `OPENCODE_VERSION` defaults to `latest`, which the
+build resolves through the GitHub API and echoes into the log. Set it to a
+version to pin a rebuild. Either way CI builds the image and runs the CLI
+before anything reaches the registry.
 
 See the [top-level README](../../README.md) for the knobs, how the two build
 stages fit together, and how to verify what we publish.

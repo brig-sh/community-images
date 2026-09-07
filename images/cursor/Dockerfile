@@ -118,7 +118,7 @@ RUN useradd -m -u ${AGENT_UID} -s /bin/bash cursor \
 # Under /usr/local rather than the home directory, because a host directory
 # gets mounted over /home/cursor at boot. `agent` is the current name and
 # `cursor-agent` the legacy one; the installer creates both, so we do too.
-ARG CURSOR_VERSION=2026.08.11-e8db854
+ARG CURSOR_VERSION=2026.09.02-c22c1a3
 RUN arch="$(dpkg --print-architecture)" \
  && case "$arch" in \
       arm64) carch=arm64 ;; \

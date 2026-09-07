@@ -25,8 +25,9 @@ make build check
 `check` asserts the image has a guest kernel, its urunc metadata, both guest
 binaries, and a `grok` the unprivileged user can run.
 
-Pinned at `GROK_VERSION=1.0.0`. Bump it deliberately, in a pull request -- CI
-builds the new version and runs it before anything reaches the registry.
+Tracks the current release: `GROK_VERSION` defaults to `latest`, which npm
+resolves at build time. Set it to a version to pin a rebuild. Either way CI
+builds the image and runs the CLI before anything reaches the registry.
 
 See the [top-level README](../../README.md) for the knobs, how the two build
 stages fit together, and how to verify what we publish.
