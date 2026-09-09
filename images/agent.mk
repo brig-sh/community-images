@@ -11,7 +11,7 @@
 # Both sources are public, so nothing here needs credentials:
 #
 #   URUNC_SRC   a urunc checkout at the commit URUNC_REF pins, which is where
-#               cmd/urunit-agent lives (nofireai/urunc_fork). That commit is
+#               cmd/urunit-agent lives (urunc-dev/urunc). That commit is
 #               shared with hull and hull-assets -- see the note on URUNC_REF.
 #   URUNIT_SRC  a urunit checkout at the commit URUNIT_REF pins, which carries
 #               the controlling-tty and reaping fixes. That commit is shared
@@ -56,12 +56,12 @@ REVISION    ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 
 URUNC_SRC   ?=
 URUNIT_SRC  ?=
-URUNC_REPO  ?= https://github.com/nofireai/urunc_fork
+URUNC_REPO  ?= https://github.com/urunc-dev/urunc
 
 # URUNC_REF is a commit, and it is the same commit two other repositories pin:
 #
-#   hull/go.mod       replace github.com/urunc-dev/urunc => .../urunc_fork
-#                     v0.7.1-0.20260817061214-770a319bb025
+#   hull/go.mod       require github.com/urunc-dev/urunc <pseudo-version>
+#                     v0.8.1-0.20260907203506-f02da0c7e57a
 #   hull-assets/PINS  URUNC_REF
 #
 # Bump all three in one change. They are one pin written down three times
@@ -80,7 +80,7 @@ URUNC_REPO  ?= https://github.com/nofireai/urunc_fork
 # hull-assets' ci/check-pin-coherence.sh compares the three and fails on
 # divergence, so a bump that misses one of them stops being something you find
 # out about from a guest.
-URUNC_REF   ?= 770a319bb02583b93116f3083ca020cbeb216706
+URUNC_REF   ?= f02da0c7e57a95d379d59ef80b09aa9cc33308a7
 
 URUNIT_REPO ?= https://github.com/NOFireAI/urunit
 # A commit, for the same reason URUNC_REF is one: this is PID 1 in every
