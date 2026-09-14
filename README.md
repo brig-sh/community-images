@@ -30,9 +30,10 @@ a bring-your-own image; see [docs/bring-your-own-image.md](docs/bring-your-own-i
 | Gemini CLI | `gemini` | Google | `ghcr.io/brig-sh/gemini` |
 | Grok CLI | `grok` | xAI | `ghcr.io/brig-sh/grok` |
 | opencode | `opencode` | OSS | `ghcr.io/brig-sh/opencode` |
+| pi | `pi` | Earendil Works | `ghcr.io/brig-sh/pi` |
 | Cursor Agent | `cursor-agent` | Cursor | not published, see below |
 
-Claude Code and Codex are the proven core. Gemini, Grok and opencode are
+Claude Code and Codex are the proven core. Gemini, Grok, opencode and pi are
 example templates -- they build, and the CLI runs, but they have had less
 mileage than the first two.
 
