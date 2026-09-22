@@ -48,7 +48,13 @@ STOCK_IMAGE ?= $(REGISTRY)/$(AGENT)-stock:$(TAG)
 
 # uid 501 is the first human user on macOS. Files the agent writes to a
 # virtiofs share (its persistent home, a mounted project) then land with the
-# host user's ownership and stay writable both ways. Override on Linux hosts.
+# host user's ownership and stay writable both ways. Override on Linux hosts,
+# where the first human user is 1000.
+#
+# Only claude-code takes a value other than 501 today. The other five images
+# still run `useradd -u $(AGENT_UID)` against a base that already has an
+# `ubuntu` account on 1000, so they fail the build there; see the note in
+# images/claude-code/Dockerfile for what that costs and how it is handled.
 AGENT_UID   ?= 501
 
 SOURCE_URL  ?= https://github.com/brig-sh/community-images

@@ -15,6 +15,19 @@ The image runs as user `claude` (uid 501 by default), and `/home/claude`
 is where brig mounts your persistent home. The CLI lives in
 `/usr/local/bin`, outside the home, so that mount cannot shadow it.
 
+501 is the first human user on macOS. On a Linux host it is 1000, so build
+with `AGENT_UID=1000` if you want files the agent writes to a bind mount or a
+share to come back owned by you:
+
+```bash
+make stock AGENT_UID=1000
+```
+
+The account is `claude` either way. At 1000 it is Ubuntu's own `ubuntu` user
+renamed rather than a second account beside it, which is also what puts the
+group on 1000 -- at the 501 default the group lands on 1001, because `ubuntu`
+is still holding 1000.
+
 **Authentication.** Run `claude` and it walks you through sign-in; the resulting state lives in
 the home directory, which brig persists. No credential is baked into the image.
 

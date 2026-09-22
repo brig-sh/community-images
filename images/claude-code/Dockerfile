@@ -91,11 +91,38 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
  && rm -rf /var/lib/apt/lists/* \
  && node --version && npx --version
 
-# uid 501 is the first human user on macOS. Files the agent writes to a
-# virtiofs share (its persistent home, a mounted project directory) then
-# carry the host user's ownership and stay writable from both sides.
+# uid 501 is the first human user on macOS, 1000 the first on Linux. Files the
+# agent writes to a virtiofs share (its persistent home, a mounted project
+# directory) then carry the host user's ownership and stay writable from both
+# sides. Override on a Linux host with AGENT_UID=1000.
+#
+# ubuntu:24.04 already ships an `ubuntu` account sitting on 1000:1000, so a
+# plain `useradd -u 1000` fails outright with "UID already in use" -- and the
+# obvious reaction to that, reaching for 1001, puts the agent on a uid no host
+# user has. Take the existing account over rather than adding a second one
+# beside it. Renaming is also the only way to land on *gid* 1000: useradd puts
+# the new group on the next free id while `ubuntu` still holds 1000, which is
+# why the default build below is uid 501 but gid 1001.
+#
+# The login stays `claude` down either branch. Brig derives the guest account
+# from a profile's `guestHome:` by taking the last path element and has no
+# field to set it separately, so the name is load-bearing rather than
+# cosmetic: rename it here and every profile pointing at /home/claude fails
+# its run.
+#
+# -c "" and -G "" so the taken-over account is the one the other branch would
+# have created: useradd leaves the comment field empty and the user in nothing
+# but its own group, while the inherited `ubuntu` account arrives describing
+# itself as "Ubuntu" and sitting in eight of them. Dropping `sudo` along with
+# the rest costs nothing -- the sudoers drop-in below is what grants sudo, and
+# `check-stock` runs `sudo -n` as this user either way.
 ARG AGENT_UID=501
-RUN useradd -m -u ${AGENT_UID} -s /bin/bash claude \
+RUN if holder="$(getent passwd ${AGENT_UID} | cut -d: -f1)" && [ -n "$holder" ]; then \
+        groupmod -n claude "$(id -gn "$holder")" \
+     && usermod -l claude -d /home/claude -m -s /bin/bash -c "" -G "" "$holder"; \
+    else \
+        useradd -m -u ${AGENT_UID} -s /bin/bash claude; \
+    fi \
  && mkdir -p /work && chown claude:claude /work \
  && printf 'claude ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/claude \
  && chmod 0440 /etc/sudoers.d/claude
