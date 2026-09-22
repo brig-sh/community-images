@@ -48,14 +48,28 @@ STOCK_IMAGE ?= $(REGISTRY)/$(AGENT)-stock:$(TAG)
 
 # uid 501 is the first human user on macOS. Files the agent writes to a
 # virtiofs share (its persistent home, a mounted project) then land with the
-# host user's ownership and stay writable both ways. Override on Linux hosts,
-# where the first human user is 1000.
+# host user's ownership and stay writable both ways.
 #
-# Only claude-code takes a value other than 501 today. The other five images
-# still run `useradd -u $(AGENT_UID)` against a base that already has an
-# `ubuntu` account on 1000, so they fail the build there; see the note in
-# images/claude-code/Dockerfile for what that costs and how it is handled.
+# It is not only a convention the guest keeps to itself. hull reads the image's
+# configured user, resolves it against the image's own /etc/passwd, and passes
+# the pair to the VMM as --fs-uid/--fs-gid, which is what the share is
+# presented as inside the guest. An image with no user set gets neither flag
+# and its share arrives owned by root, where a non-root agent cannot create
+# anything at the top of its own home -- and cannot fix it either, because
+# chown on a virtiofs mount root returns EINVAL.
 AGENT_UID   ?= 501
+
+# The other uids this image is also published under, space separated, on top
+# of the AGENT_UID default. `make alt-uids` is what CI reads to decide which
+# extra builds a given image gets, so this is per-image rather than a list in
+# the workflow: an image whose Dockerfile cannot take a different uid leaves it
+# empty and CI builds nothing extra for it.
+#
+# Five of the six are in exactly that position today. They still run
+# `useradd -u $(AGENT_UID)` against a base that already has an `ubuntu` account
+# on 1000, which fails outright there; images/claude-code/Dockerfile has the
+# note on what that costs and how it is handled.
+ALT_UIDS    ?=
 
 SOURCE_URL  ?= https://github.com/brig-sh/community-images
 REVISION    ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -124,6 +138,30 @@ BUILD_DIR   := dist
 # that is who the agent is: a toolchain only root can reach is no toolchain,
 # and `sudo -n` proves the agent can install without being prompted for a
 # password it does not have.
+# The image has to actually run as the uid it was built for.
+#
+# This is not paranoia, it is the same silent substitution the kernel check
+# below exists for. bunny, the BuildKit frontend the bootable variant is built
+# with, ignores --build-arg: `make base AGENT_UID=1000` produces a perfectly
+# healthy image that still has the agent on 501, and every other assertion in
+# this file passes on it. Measured, not assumed -- the plain-docker `stock`
+# build of the same Dockerfile on the same commit comes out on 1000.
+#
+# So a bootable image cannot take AGENT_UID today, and this is what says so
+# rather than letting a mislabelled image reach a registry.
+define assert_uid
+	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(1) -c '\
+		set -e; \
+		got="$$(id -u)"; gotg="$$(id -g)"; \
+		if [ "$$got" != "$(AGENT_UID)" ]; then \
+			echo "$(1) runs as uid $$got, but was built for $(AGENT_UID)"; \
+			echo "if this is the bootable variant: bunny ignores --build-arg,"; \
+			echo "so only the stock build can take a non-default AGENT_UID"; \
+			exit 1; \
+		fi; \
+		echo "ok: runs as uid $$got gid $$gotg ($$(id -un))"'
+endef
+
 define assert_toolchain
 	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(1) -c '\
 		set -e; \
@@ -152,7 +190,7 @@ urunc_src   = $(if $(URUNC_SRC),$(abspath $(URUNC_SRC)),$(CURDIR)/$(BUILD_DIR)/s
 urunit_src  = $(if $(URUNIT_SRC),$(abspath $(URUNIT_SRC)),$(CURDIR)/$(BUILD_DIR)/src/urunit)
 
 .PHONY: all build sources base binaries overlay check push clean \
-        stock check-stock push-stock
+        stock check-stock push-stock alt-uids
 
 all: build check push
 
@@ -253,6 +291,7 @@ check:
 	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(IMAGE) -c '\
 		set -e; command -v $(CLI) >/dev/null || { echo "$(CLI) not on the runtime user PATH"; exit 1; }; \
 		echo "ok: $(CLI) runnable as $$(id -un)"'
+	$(call assert_uid,$(IMAGE))
 	@# node, as the runtime user. The agents' skills and plugins shell out to
 	@# node and npx, so a guest missing either fails at the point of use with
 	@# an error that names the skill rather than the image. npx is asserted
@@ -324,6 +363,7 @@ check-stock:
 	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(STOCK_IMAGE) -c '\
 		set -e; command -v $(CLI) >/dev/null || { echo "$(CLI) not on the runtime user PATH"; exit 1; }; \
 		echo "ok: $(CLI) runnable as $$(id -un)"'
+	$(call assert_uid,$(STOCK_IMAGE))
 	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(STOCK_IMAGE) -c '\
 		set -e; \
 		command -v node >/dev/null || { echo "node not on the runtime user PATH"; exit 1; }; \
@@ -335,6 +375,12 @@ push-stock:
 	docker save $(STOCK_IMAGE) -o $(BUILD_DIR)/stock.tar
 	crane push $(BUILD_DIR)/stock.tar $(STOCK_IMAGE)
 	rm -f $(BUILD_DIR)/stock.tar
+
+# What CI loops over to build this image's extra uids. Prints nothing when
+# there are none, so a `for` over it runs zero times rather than once on an
+# empty word.
+alt-uids:
+	@echo $(ALT_UIDS)
 
 clean:
 	rm -rf $(BUILD_DIR)

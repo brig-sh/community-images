@@ -165,6 +165,24 @@ Silicon, amd64 for urunc on Linux.
 | `:latest` | multi-arch index, resolves to the right one |
 | `:arm64`, `:amd64` | the per-arch images |
 | `:arm64-<short-sha>`, `:amd64-<short-sha>` | immutable, for pinning a build |
+| `:uid1000` | `claude-code-stock` only: the same image with the agent on uid 1000 |
+| `:arm64-uid1000`, `:amd64-uid1000` | the per-arch uid-1000 images |
+
+The default images put the agent on uid 501, the first human user on macOS, so
+that a file it writes to a shared directory comes back owned by you. On a Linux
+host that user is 1000, and `:uid1000` is the same image built for it.
+
+This is not a preference. hull resolves the image's configured user against the
+image's own `/etc/passwd` and hands the pair to the VMM as `--fs-uid`/
+`--fs-gid`, which is what the shared home is presented as inside the guest. Run
+an image built for 501 where the host user is 1000 and every file arrives owned
+by somebody else; run one with no user configured at all and the share arrives
+owned by root, where the agent cannot create anything at the top of its own home
+and cannot repair it either -- `chown` on a virtiofs mount root returns EINVAL.
+
+The uid tags exist on the stock package only. bunny ignores `--build-arg`, so
+the bootable variant cannot be built for a different uid; `make check` asserts
+the uid now rather than letting a mislabelled image be published.
 
 Prefer `:latest` or a digest. Pulling the wrong architecture here is worse
 than usual: each one bundles a different guest kernel, so it does not merely
@@ -228,7 +246,8 @@ unprivileged user. Useful knobs, all overridable on the command line:
 | --- | --- | --- |
 | `IMAGE` | `ghcr.io/brig-sh/<agent>:<arch>` | Tag to build |
 | `PLATFORM` | `linux/arm64` | Build platform (`linux/amd64` also builds the guest kernel) |
-| `AGENT_UID` | `501` | uid of the in-guest user |
+| `AGENT_UID` | `501` | uid of the in-guest user (`1000` for a Linux host) |
+| `ALT_UIDS` | (empty) | extra uids CI also publishes this image under |
 | `URUNC_SRC` / `URUNIT_SRC` | cloned into `dist/src` | Guest init checkouts |
 
 `AGENT_UID` defaults to 501 because that is the first human user on macOS.
