@@ -368,6 +368,82 @@ jobs:
             "$STOCK_REF@$STOCK_DIGEST" > /dev/null
           echo "verified $STOCK_REF@$STOCK_DIGEST"
 
+      # The uid variants, for a host whose first human user is not macOS's 501.
+      #
+      # This is not cosmetic and it is not fixable at boot. hull resolves the
+      # image's configured user against the image's own /etc/passwd and hands
+      # the pair to the VMM as --fs-uid/--fs-gid, and that is what the shared
+      # home is presented as inside the guest. Build the agent on a uid the
+      # host does not have and every shared file arrives owned by somebody
+      # else; build it on no user at all and the share arrives owned by root,
+      # where the agent cannot create anything at the top of its own home and
+      # cannot repair it either -- chown on a virtiofs mount root is EINVAL.
+      #
+      # Stock only, and that is a limitation rather than a preference. bunny,
+      # the frontend the bootable variant is built with, ignores --build-arg:
+      # `make base AGENT_UID=1000` yields a healthy image still on 501. So a
+      # bootable uid tag would be a mislabelled image, and `check`'s assert_uid
+      # now refuses to produce one rather than letting it reach a registry.
+      # Giving the bootable variant a uid means retargeting the account in the
+      # overlay, the same way the kernel is swapped there; that is a separate
+      # change.
+      #
+      # Extra tags on the existing package rather than a package of its own,
+      # deliberately: a new GHCR package is created private, and making one
+      # public is a web-UI action nobody can do from here. A new tag inherits
+      # the visibility the package already has, so this publishes something
+      # people can actually pull.
+      #
+      # Which uids an image gets is the image's own answer (ALT_UIDS in its
+      # Makefile, read through `make alt-uids`), not a list kept here. An image
+      # whose Dockerfile cannot take a different uid prints nothing and this
+      # loop runs zero times for it.
+      - name: Build, check and publish the uid variants
+        env:
+          PUBLISH: ${{ steps.mode.outputs.publish }}
+          IMAGE_NAME: ${{ matrix.image }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          ALT_UIDS="$(make -C "images/$IMAGE_NAME" --no-print-directory alt-uids)"
+          if [ -z "$ALT_UIDS" ]; then
+            echo "no uid variants for $IMAGE_NAME"
+            exit 0
+          fi
+
+          for uid in $ALT_UIDS; do
+            ref="$REGISTRY/$IMAGE_NAME-stock:$ARCH-uid$uid"
+
+            make -C "images/$IMAGE_NAME" stock check-stock \
+              PLATFORM="linux/$ARCH" AGENT_UID="$uid" \
+              STOCK_IMAGE="$ref" REVISION="$GITHUB_SHA"
+
+            # On a pull request the build and the check are the whole point;
+            # nothing below runs there.
+            [ "$PUBLISH" = "true" ] || continue
+
+            make -C "images/$IMAGE_NAME" push-stock STOCK_IMAGE="$ref"
+
+            # Resolve the digest through the per-commit alias this job just
+            # set, not through the moving tag, for the reason spelled out
+            # above the default variant's push.
+            repo="${ref%:*}"
+            alias="$ARCH-uid$uid-${GITHUB_SHA::7}"
+            crane tag "$ref" "$alias"
+            digest="$(crane digest "$repo:$alias")"
+
+            sbom="sbom-stock-uid$uid.spdx.json"
+            .github/scripts/retry.sh cosign sign --yes "$repo@$digest"
+            syft "$repo@$digest" -o spdx-json > "$sbom"
+            .github/scripts/retry.sh cosign attest --yes --type spdxjson \
+              --predicate "$sbom" "$repo@$digest"
+            .github/scripts/retry.sh cosign verify \
+              --certificate-identity-regexp "$COSIGN_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$repo@$digest" > /dev/null
+            echo "published and verified $ref@$digest"
+          done
+
       - name: Summary
         if: steps.mode.outputs.publish == 'true'
         run: |
@@ -443,22 +519,43 @@ jobs:
         if: steps.mode.outputs.publish == 'true'
         run: crane auth login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
 
-      # One index per variant. Both are assembled the same way, so this is a
-      # loop rather than two near-identical blocks.
+      # One index per variant, and one more per uid the image also publishes
+      # under. Assembled the same way, so this is a loop rather than four
+      # near-identical blocks.
+      #
+      # The uid indexes are tagged `:uid<n>` rather than `:latest`, so
+      # `:latest` keeps meaning the default build and nothing a consumer
+      # already pulls changes underneath them. Which uids exist is the image's
+      # own answer, read the same way the build job reads it.
       - name: Assemble and sign the indexes
         if: steps.mode.outputs.publish == 'true'
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
         run: |
           set -euo pipefail
-          for REF in "$REGISTRY/${{ matrix.image }}" "$REGISTRY/${{ matrix.image }}-stock"; do
+
+          index() {
+            ref="$1"; tag="$2"; suffix="$3"
             crane index append \
-              -m "$REF:arm64" -m "$REF:amd64" \
-              -t "$REF:latest"
-            DIGEST="$(crane digest "$REF:latest")"
-            .github/scripts/retry.sh cosign sign --yes "$REF@$DIGEST"
+              -m "$ref:arm64$suffix" -m "$ref:amd64$suffix" \
+              -t "$ref:$tag"
+            digest="$(crane digest "$ref:$tag")"
+            .github/scripts/retry.sh cosign sign --yes "$ref@$digest"
             .github/scripts/retry.sh cosign verify \
               --certificate-identity-regexp "$COSIGN_IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-              "$REF@$DIGEST" > /dev/null
-            echo "index $REF:latest@$DIGEST"
-            crane manifest "$REF:latest" | jq -r '.manifests[] | "  \(.platform.os)/\(.platform.architecture) \(.digest)"'
+              "$ref@$digest" > /dev/null
+            echo "index $ref:$tag@$digest"
+            crane manifest "$ref:$tag" | jq -r '.manifests[] | "  \(.platform.os)/\(.platform.architecture) \(.digest)"'
+          }
+
+          for REF in "$REGISTRY/$IMAGE_NAME" "$REGISTRY/$IMAGE_NAME-stock"; do
+            index "$REF" latest ""
+          done
+
+          # The uid variants are published for the stock package only; see the
+          # bunny note in the build job.
+          ALT_UIDS="$(make -C "images/$IMAGE_NAME" --no-print-directory alt-uids)"
+          for uid in $ALT_UIDS; do
+            index "$REGISTRY/$IMAGE_NAME-stock" "uid$uid" "-uid$uid"
           done
