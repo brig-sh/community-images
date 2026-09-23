@@ -26,6 +26,7 @@ a bring-your-own image; see [docs/bring-your-own-image.md](docs/bring-your-own-i
 | Agent | CLI | Vendor | Image |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | Anthropic | `ghcr.io/brig-sh/claude-code` |
+| Claude Code (ubuntu account) | `claude` | Anthropic | `ghcr.io/brig-sh/claude-ubuntu` |
 | Codex | `codex` | OpenAI | `ghcr.io/brig-sh/codex` |
 | Gemini CLI | `gemini` | Google | `ghcr.io/brig-sh/gemini` |
 | Grok CLI | `grok` | xAI | `ghcr.io/brig-sh/grok` |
@@ -183,6 +184,11 @@ and cannot repair it either -- `chown` on a virtiofs mount root returns EINVAL.
 The uid tags exist on the stock package only. bunny ignores `--build-arg`, so
 the bootable variant cannot be built for a different uid; `make check` asserts
 the uid now rather than letting a mislabelled image be published.
+
+[`claude-ubuntu`](images/claude-ubuntu) is the way around that: it creates no
+user and runs as the `ubuntu` account the base already puts on 1000:1000, so
+it reads no build argument and both its variants are on 1000 by construction.
+Its images carry no uid tag because there is only one uid to have.
 
 Prefer `:latest` or a digest. Pulling the wrong architecture here is worse
 than usual: each one bundles a different guest kernel, so it does not merely
