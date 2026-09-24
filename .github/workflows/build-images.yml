@@ -49,6 +49,10 @@ on:
         description: "Publish to ghcr.io/brig-sh"
         type: boolean
         default: false
+      bootable:
+        description: "Also build the bunny bootable images"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -308,7 +312,16 @@ jobs:
       # actually bootable -- kernel, urunc metadata, both guest binaries -- and
       # that the agent CLI runs as the image's unprivileged user. That check is
       # the gate: a broken image fails here rather than at someone's boot.
+      # The bunny bootable image: opt-in for now.
+      #
+      # brig boots a plain container image through genericBoot -- its own
+      # claude-code profile points at claude-code-stock -- so the stock image
+      # is what the runtime actually needs, and it is the one this repo can
+      # parameterise at all: bunny ignores --build-arg. Building the bootable
+      # variant on every push spends most of the matrix on the artefact nobody
+      # pulls, so it moves behind a dispatch input until that changes.
       - name: Build and check ${{ matrix.image }}
+        if: github.event_name == 'workflow_dispatch' && inputs.bootable
         run: |
           set -euo pipefail
           echo "IMAGE_REF=$REGISTRY/${{ matrix.image }}:${{ matrix.arch }}" >> "$GITHUB_ENV"
@@ -318,7 +331,9 @@ jobs:
             REVISION="$GITHUB_SHA"
 
       - name: Push ${{ matrix.image }}
-        if: steps.mode.outputs.publish == 'true'
+        if: >-
+          github.event_name == 'workflow_dispatch' && inputs.bootable &&
+          steps.mode.outputs.publish == 'true'
         run: |
           set -euo pipefail
           make -C "images/${{ matrix.image }}" push IMAGE="$IMAGE_REF"
@@ -343,14 +358,18 @@ jobs:
       # certificate binds this workflow's OIDC identity, and the signature
       # lands in Sigstore's transparency log.
       - name: Sign ${{ matrix.image }}
-        if: steps.mode.outputs.publish == 'true'
+        if: >-
+          github.event_name == 'workflow_dispatch' && inputs.bootable &&
+          steps.mode.outputs.publish == 'true'
         run: .github/scripts/retry.sh cosign sign --yes "$IMAGE_REF@$DIGEST"
 
       # SBOM over what was actually published, read back from the registry
       # rather than from the local build, then attached as a signed
       # attestation on the same digest.
       - name: Attest SBOM for ${{ matrix.image }}
-        if: steps.mode.outputs.publish == 'true'
+        if: >-
+          github.event_name == 'workflow_dispatch' && inputs.bootable &&
+          steps.mode.outputs.publish == 'true'
         run: |
           set -euo pipefail
           syft "$IMAGE_REF@$DIGEST" -o spdx-json > sbom.spdx.json
@@ -359,7 +378,9 @@ jobs:
       # Verify from the outside, in the same run: if this fails, the artifact
       # is not usable by the verification instructions we publish.
       - name: Verify signature and attestation
-        if: steps.mode.outputs.publish == 'true'
+        if: >-
+          github.event_name == 'workflow_dispatch' && inputs.bootable &&
+          steps.mode.outputs.publish == 'true'
         run: |
           set -euo pipefail
           .github/scripts/retry.sh cosign verify \
@@ -495,8 +516,11 @@ jobs:
             echo
             echo '```'
             echo "$STOCK_REF@$STOCK_DIGEST"
-            echo "$IMAGE_REF@$DIGEST"
-            echo "$REGISTRY/${{ matrix.image }}:${{ matrix.arch }}-${GITHUB_SHA::7}"
+            # The bootable image is opt-in, so it may not have been built.
+            if [ -n "${IMAGE_REF:-}" ] && [ -n "${DIGEST:-}" ]; then
+              echo "$IMAGE_REF@$DIGEST"
+              echo "$REGISTRY/${{ matrix.image }}:${{ matrix.arch }}-${GITHUB_SHA::7}"
+            fi
             echo '```'
             echo
             echo "signed (keyless) and SBOM-attested."
@@ -567,10 +591,12 @@ jobs:
   manifest:
     name: ${{ matrix.image }} (index)
     needs: [select, build]
+    # Only the bootable images carry a per-arch guest kernel and therefore need
+    # an index; the stock images are ordinary and resolve on their own. So this
+    # follows the bootable build and is opt-in with it.
     if: >-
       needs.select.outputs.images != '[]' &&
-      (github.event_name == 'push' ||
-       (github.event_name == 'workflow_dispatch' && inputs.push))
+      github.event_name == 'workflow_dispatch' && inputs.bootable && inputs.push
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
