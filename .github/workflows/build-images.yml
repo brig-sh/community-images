@@ -147,6 +147,36 @@ jobs:
               - "images/agent.mk"
               - ".github/workflows/build-images.yml"
 
+      # The same diff, read narrowly: only the image's own directory, with the
+      # shared files left out. A pull request uses this when it says anything,
+      # so touching agent.mk or this workflow alongside one image builds that
+      # image rather than all seven.
+      #
+      # Pull requests only. A push to main keeps the wide reading and rebuilds
+      # everything a shared file could reach, because that is the run that
+      # publishes. The trade is deliberate: a change that breaks another image
+      # can pass its pull request and fail on main, which is the right place to
+      # find out -- before anything is signed, not after.
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        if: github.event_name == 'pull_request'
+        id: filter_own
+        with:
+          filters: |
+            claude-code:
+              - "images/claude-code/**"
+            claude-ubuntu:
+              - "images/claude-ubuntu/**"
+            codex:
+              - "images/codex/**"
+            gemini:
+              - "images/gemini/**"
+            grok:
+              - "images/grok/**"
+            opencode:
+              - "images/opencode/**"
+            cursor:
+              - "images/cursor/**"
+
       # `all` deliberately excludes cursor: publishing it would mean hosting a
       # redistribution of Cursor's binary, and that terms check is still open
       # (see the Cursor note in the README). This list is a convenience, not
@@ -158,6 +188,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           INPUT_IMAGE: ${{ inputs.image }}
           CHANGED: ${{ steps.filter.outputs.changes }}
+          CHANGED_OWN: ${{ steps.filter_own.outputs.changes }}
         run: |
           set -euo pipefail
           PUBLISHABLE='["claude-code","claude-ubuntu","codex","gemini","grok","opencode"]'
@@ -169,6 +200,14 @@ jobs:
             fi
           else
             IMAGES="${CHANGED:-[]}"
+            # On a pull request, prefer the narrow reading when it names
+            # anything. An empty one means the diff touched only shared files,
+            # and then there is no narrower answer than "all of them".
+            OWN="${CHANGED_OWN:-[]}"
+            if [ "$EVENT" = "pull_request" ] \
+               && [ "$(echo "$OWN" | jq 'length')" -gt 0 ]; then
+              IMAGES="$OWN"
+            fi
             # paths-filter has no previous commit to diff against on a brand
             # new branch and reports nothing changed. The workflow only ran at
             # all because images/** was touched, so fall back to everything
