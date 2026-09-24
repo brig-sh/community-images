@@ -502,6 +502,60 @@ jobs:
             echo "signed (keyless) and SBOM-attested."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The account variants, for a rootless brig install.
+      #
+      # rootlesskit maps container uid 0 to the invoking user and 1..65536 to
+      # that user's subuid range. A guest on uid 1000 therefore lands on a host
+      # id that owns nothing: the monitor cannot open /dev/kvm and the guest
+      # cannot write the workspace that is its own home. A guest on root is the
+      # invoking user, and what it writes arrives owned by that user.
+      #
+      # Same shape as the uid variants above, and stock-only for the same
+      # reason: bunny ignores --build-arg, so the bootable image cannot be
+      # built on another account. AGENT_UID travels with the account so
+      # check-stock's own uid assertion covers it.
+      - name: Build, check and publish the account variants
+        env:
+          PUBLISH: ${{ steps.mode.outputs.publish }}
+          IMAGE_NAME: ${{ matrix.image }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          ALT_USERS="$(make -C "images/$IMAGE_NAME" --no-print-directory alt-users)"
+          if [ -z "$ALT_USERS" ]; then
+            echo "no account variants for $IMAGE_NAME"
+            exit 0
+          fi
+
+          for user in $ALT_USERS; do
+            case "$user" in
+              root) uid=0; home=/root ;;
+              *)    echo "no uid/home known for account '$user'"; exit 1 ;;
+            esac
+            ref="$REGISTRY/$IMAGE_NAME-stock:$ARCH-$user"
+
+            make -C "images/$IMAGE_NAME" stock check-stock \
+              PLATFORM="linux/$ARCH" \
+              AGENT_USER="$user" AGENT_HOME="$home" AGENT_UID="$uid" \
+              STOCK_IMAGE="$ref" REVISION="$GITHUB_SHA"
+
+            [ "$PUBLISH" = "true" ] || continue
+
+            make -C "images/$IMAGE_NAME" push-stock STOCK_IMAGE="$ref"
+
+            repo="${ref%:*}"
+            alias="$ARCH-$user-${GITHUB_SHA::7}"
+            crane tag "$ref" "$alias"
+            digest="$(crane digest "$repo:$alias")"
+
+            sbom="sbom-stock-$user.spdx.json"
+            .github/scripts/retry.sh cosign sign --yes "$repo@$digest"
+            syft "$repo@$digest" -o spdx-json > "$sbom"
+            .github/scripts/retry.sh cosign attest --yes --type spdxjson \
+              --predicate "$sbom" "$repo@$digest"
+            echo "published $repo@$digest ($user)"
+          done
+
   # Stitch the two per-arch tags into a multi-arch index under :latest, so a
   # plain `docker pull ghcr.io/brig-sh/<agent>` resolves to the right one. This
   # matters more here than for an ordinary image: each arch bundles a different

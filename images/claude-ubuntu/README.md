@@ -10,9 +10,30 @@ as is already there and already on the uid that matches whoever is running
 brig.
 
 ```bash
-docker pull ghcr.io/brig-sh/claude-ubuntu-stock   # ordinary container
-docker pull ghcr.io/brig-sh/claude-ubuntu         # bootable guest image
+docker pull ghcr.io/brig-sh/claude-ubuntu-stock          # ordinary container
+docker pull ghcr.io/brig-sh/claude-ubuntu-stock:amd64-root   # the same, on root
+docker pull ghcr.io/brig-sh/claude-ubuntu                # bootable guest image
 ```
+
+## The root tag
+
+`-stock:<arch>-root` is the same image ending on `root` in `/root` instead of
+`ubuntu` in `/home/ubuntu`. It is for a **rootless** brig install, where
+1000:1000 stops being the right answer.
+
+rootlesskit maps container uid 0 to the invoking user and 1..65536 to that
+user's subuid range. On uid 1000 the guest therefore lands on a host id that
+owns nothing, and two things fail: the monitor cannot open `/dev/kvm`, and the
+guest cannot write the workspace that is its own home. On root the guest *is*
+the invoking user, so both work and the files it writes arrive owned by that
+user rather than by root.
+
+On a root install the plain image is still the one to use: there container uid
+1000 is the host's own 1000, which is the point of this image.
+
+Stock only. bunny ignores `--build-arg`, so the bootable image stays on
+`ubuntu` whatever is passed, and `check` asserts that rather than trusting it.
+brig boots the stock image anyway, through `genericBoot`.
 
 ## Why this exists beside claude-code
 

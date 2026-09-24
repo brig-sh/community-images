@@ -190,6 +190,14 @@ user and runs as the `ubuntu` account the base already puts on 1000:1000, so
 it reads no build argument and both its variants are on 1000 by construction.
 Its images carry no uid tag because there is only one uid to have.
 
+A rootless brig install wants the opposite. rootlesskit maps container uid 0 to
+the invoking user and everything above it to a subuid, so a guest on 1000 owns
+nothing on the host: it cannot open `/dev/kvm` and cannot write its own home.
+`claude-ubuntu-stock:<arch>-root` is the same image ending on `root`, which
+puts the guest back on the invoking user and makes the files it writes that
+user's. Use the plain image on a root install and the root tag on a rootless
+one.
+
 Prefer `:latest` or a digest. Pulling the wrong architecture here is worse
 than usual: each one bundles a different guest kernel, so it does not merely
 run slowly under emulation, it does not boot at all.

@@ -71,6 +71,28 @@ AGENT_UID   ?= 501
 # note on what that costs and how it is handled.
 ALT_UIDS    ?=
 
+# Extra accounts to publish the stock image on, as `-stock:<arch>-<user>`. A
+# rootless brig install needs one on root: rootlesskit maps container uid 0 to
+# the invoking user, so a root guest is that user -- it opens /dev/kvm and owns
+# the workspace, and what it writes arrives owned by that user. A guest on 1000
+# lands on a subuid that owns neither.
+#
+# Stock only, for the same reason the uid variants are: bunny ignores
+# --build-arg, so a bootable image on another account cannot be built this way.
+ALT_USERS   ?=
+
+# What an unset account means is the image's business, not this file's: an
+# image that names one here overrides its Dockerfile's default, and one that
+# leaves these alone keeps it.
+AGENT_USER  ?=
+AGENT_HOME  ?=
+
+# Passed only when set. `--build-arg AGENT_USER=` is not "leave the default
+# alone", it is "the account is the empty string", and docker takes it
+# literally: the image ends on USER with nothing after it.
+account_args = $(if $(AGENT_USER),--build-arg AGENT_USER=$(AGENT_USER)) \
+               $(if $(AGENT_HOME),--build-arg AGENT_HOME=$(AGENT_HOME))
+
 SOURCE_URL  ?= https://github.com/brig-sh/community-images
 REVISION    ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 
@@ -190,7 +212,7 @@ urunc_src   = $(if $(URUNC_SRC),$(abspath $(URUNC_SRC)),$(CURDIR)/$(BUILD_DIR)/s
 urunit_src  = $(if $(URUNIT_SRC),$(abspath $(URUNIT_SRC)),$(CURDIR)/$(BUILD_DIR)/src/urunit)
 
 .PHONY: all build sources base binaries overlay check push clean \
-        stock check-stock push-stock alt-uids
+        stock check-stock push-stock alt-uids alt-users
 
 all: build check push
 
@@ -339,6 +361,7 @@ stock: | $(BUILD_DIR)
 	sed '/^#[[:space:]]*syntax=/d' Dockerfile > $(BUILD_DIR)/Dockerfile.stock
 	DOCKER_BUILDKIT=1 docker build --platform $(PLATFORM) \
 		--build-arg AGENT_UID=$(AGENT_UID) \
+		$(account_args) \
 		--provenance=false --sbom=false \
 		--label org.opencontainers.image.source="$(SOURCE_URL)" \
 		--label org.opencontainers.image.revision="$(REVISION)" \
@@ -381,6 +404,9 @@ push-stock:
 # empty word.
 alt-uids:
 	@echo $(ALT_UIDS)
+
+alt-users:
+	@echo $(ALT_USERS)
 
 clean:
 	rm -rf $(BUILD_DIR)
