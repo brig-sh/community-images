@@ -93,11 +93,20 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
 # uid 501 is the first human user on macOS. Files the agent writes to a
 # virtiofs share (its persistent home, a mounted project directory) then
 # carry the host user's ownership and stay writable from both sides.
+# AGENT_USER is declared here rather than beside the USER line at the bottom
+# because this step has to know it. The root variant needs no account
+# created: root is already here, with a home and with sudo, and
+# `useradd -u 0` fails outright with "UID 0 is not unique".
 ARG AGENT_UID=501
-RUN useradd -m -u ${AGENT_UID} -s /bin/bash gemini \
- && mkdir -p /work && chown gemini:gemini /work \
- && printf 'gemini ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/gemini \
- && chmod 0440 /etc/sudoers.d/gemini
+ARG AGENT_USER=gemini
+RUN if [ "${AGENT_USER}" = root ]; then \
+        mkdir -p /work; \
+    else \
+        useradd -m -u ${AGENT_UID} -s /bin/bash gemini \
+     && mkdir -p /work && chown gemini:gemini /work \
+     && printf 'gemini ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/gemini \
+     && chmod 0440 /etc/sudoers.d/gemini; \
+    fi
 
 # Installed globally, outside /home, so the host directory mounted over
 # /home/gemini at boot cannot shadow it. Pinned -- bump deliberately.
@@ -121,6 +130,21 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     TERM=xterm-256color
 
-USER gemini
-WORKDIR /home/gemini
+# The account the image ends on. `gemini` is the answer on a root brig
+# install: the agent is the host's own user and the workspace stays that
+# user's.
+#
+# A rootless install inverts it. rootlesskit maps container uid 0 to the
+# invoking user and 1..65536 to that user's subuid range, so a guest on 501
+# lands on a host id that owns nothing: the monitor cannot open /dev/kvm and
+# the guest cannot write the workspace that is its own home. On root the
+# guest is the invoking user, and the files it writes arrive owned by that
+# user.
+#
+# Like AGENT_UID above, this reaches the stock build only. bunny ignores
+# --build-arg, so the bootable variant stays on `gemini` whatever is passed
+# here, and `check` asserts that rather than trusting it.
+ARG AGENT_HOME=/home/gemini
+USER ${AGENT_USER}
+WORKDIR ${AGENT_HOME}
 CMD ["/bin/bash"]

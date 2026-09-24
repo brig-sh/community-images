@@ -168,6 +168,8 @@ Silicon, amd64 for urunc on Linux.
 | `:arm64-<short-sha>`, `:amd64-<short-sha>` | immutable, for pinning a build |
 | `:uid1000` | `claude-code-stock` only: the same image with the agent on uid 1000 |
 | `:arm64-uid1000`, `:amd64-uid1000` | the per-arch uid-1000 images |
+| `:root` | stock only: the same image ending on `root` in `/root` |
+| `:arm64-root`, `:amd64-root` | the per-arch root images |
 
 The default images put the agent on uid 501, the first human user on macOS, so
 that a file it writes to a shared directory comes back owned by you. On a Linux
@@ -190,13 +192,34 @@ user and runs as the `ubuntu` account the base already puts on 1000:1000, so
 it reads no build argument and both its variants are on 1000 by construction.
 Its images carry no uid tag because there is only one uid to have.
 
-A rootless brig install wants the opposite. rootlesskit maps container uid 0 to
-the invoking user and everything above it to a subuid, so a guest on 1000 owns
-nothing on the host: it cannot open `/dev/kvm` and cannot write its own home.
-`claude-ubuntu-stock:root` is the same image ending on `root`, which puts the
-guest back on the invoking user and makes the files it writes that user's. It
-is a multi-arch index like `:latest`, so one profile works on either machine. Use the plain image on a root install and the root tag on a rootless
-one.
+A rootless brig install wants the opposite. rootlesskit maps container uid 0
+to the invoking user and everything above it to a subuid, so a guest on 501 or
+1000 owns nothing on the host: it cannot open `/dev/kvm` and cannot write its
+own home. `<agent>-stock:root` is the same image ending on `root`, which puts
+the guest back on the invoking user and makes the files it writes that user's.
+
+Every published agent has one. It is a multi-arch index like `:latest`, so a
+single profile works on either machine, and the per-arch `-stock:<arch>-root`
+tags stay for pinning. Use the plain image on a root install and the root tag
+on a rootless one.
+
+A profile for a root image names the home it ends on, because brig derives the
+guest account from the last element of `guestHome`:
+
+```yaml
+image: ghcr.io/brig-sh/claude-code-stock:root
+guestHome: /root
+```
+
+Claude Code needs one thing more there. It refuses
+`--dangerously-skip-permissions` outright when it is running as root, so a
+profile for a root image sets `IS_SANDBOX=1` to say the boundary is the VM
+rather than the account. The other CLIs have no such check.
+
+The root tags are on the stock package only, for the same reason the uid tags
+are: bunny ignores `--build-arg`. That costs nothing today, because the
+profiles that boot these images are `genericBoot` profiles pointing at the
+stock package.
 
 Prefer `:latest` or a digest. Pulling the wrong architecture here is worse
 than usual: each one bundles a different guest kernel, so it does not merely

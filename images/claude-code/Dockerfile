@@ -116,16 +116,26 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
 # itself as "Ubuntu" and sitting in eight of them. Dropping `sudo` along with
 # the rest costs nothing -- the sudoers drop-in below is what grants sudo, and
 # `check-stock` runs `sudo -n` as this user either way.
+# AGENT_USER is declared here rather than beside the USER line at the bottom
+# because this step has to know it. The root variant needs no account created:
+# root is already here, with a home and with sudo, and reaching for one on
+# AGENT_UID=0 makes the takeover branch below pick `root` as the holder and try
+# to rename it -- usermod refuses, because pid 1 is using it.
 ARG AGENT_UID=501
-RUN if holder="$(getent passwd ${AGENT_UID} | cut -d: -f1)" && [ -n "$holder" ]; then \
-        groupmod -n claude "$(id -gn "$holder")" \
-     && usermod -l claude -d /home/claude -m -s /bin/bash -c "" -G "" "$holder"; \
+ARG AGENT_USER=claude
+RUN if [ "${AGENT_USER}" = root ]; then \
+        mkdir -p /work; \
     else \
-        useradd -m -u ${AGENT_UID} -s /bin/bash claude; \
-    fi \
- && mkdir -p /work && chown claude:claude /work \
- && printf 'claude ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/claude \
- && chmod 0440 /etc/sudoers.d/claude
+        { if holder="$(getent passwd ${AGENT_UID} | cut -d: -f1)" && [ -n "$holder" ]; then \
+              groupmod -n claude "$(id -gn "$holder")" \
+           && usermod -l claude -d /home/claude -m -s /bin/bash -c "" -G "" "$holder"; \
+          else \
+              useradd -m -u ${AGENT_UID} -s /bin/bash claude; \
+          fi; } \
+     && mkdir -p /work && chown claude:claude /work \
+     && printf 'claude ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/claude \
+     && chmod 0440 /etc/sudoers.d/claude; \
+    fi
 
 # The native Claude Code binary. Installed to /usr/local/bin rather than left
 # where the installer puts it (~/.local/bin), because a host directory gets
@@ -149,6 +159,20 @@ ENV LANG=C.UTF-8 \
     DISABLE_AUTOUPDATER=1 \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
-USER claude
-WORKDIR /home/claude
+# The account the image ends on. `claude` is the answer on a root brig install:
+# the agent is the host's own user and the workspace stays that user's.
+#
+# A rootless install inverts it. rootlesskit maps container uid 0 to the
+# invoking user and 1..65536 to that user's subuid range, so a guest on 501 or
+# 1000 lands on a host id that owns nothing: the monitor cannot open /dev/kvm
+# and the guest cannot write the workspace that is its own home. On root the
+# guest is the invoking user, and the files it writes arrive owned by that
+# user.
+#
+# Like AGENT_UID above, this reaches the stock build only. bunny ignores
+# --build-arg, so the bootable variant stays on `claude` whatever is passed
+# here, and `check` asserts that rather than trusting it.
+ARG AGENT_HOME=/home/claude
+USER ${AGENT_USER}
+WORKDIR ${AGENT_HOME}
 CMD ["/bin/bash"]
