@@ -8,13 +8,34 @@ FROM ${BASE}
 
 ARG SOURCE_URL=https://github.com/brig-sh/community-images
 ARG REVISION=unknown
+ARG TITLE="Claude Code (ubuntu account)"
+ARG DESCRIPTION="Claude Code (Anthropic) on Ubuntu's own 1000:1000 account, as a bootable brig guest image"
 LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.title="Claude Code (ubuntu account)" \
-      org.opencontainers.image.description="Claude Code (Anthropic) on Ubuntu's own 1000:1000 account, as a bootable brig guest image" \
+      org.opencontainers.image.title="${TITLE}" \
+      org.opencontainers.image.description="${DESCRIPTION}" \
       sh.brig.agent="claude-ubuntu" \
       sh.brig.agent.cli="claude"
 
 COPY dist/urunit /urunit
 COPY dist/urunit-agent /urunit-agent
+
+# The account the image ends on. The base leaves it at `ubuntu`, which is the
+# whole point of this image on a root install: container uid 1000 is the host's
+# own 1000, so the workspace is the user's and stays that way.
+#
+# A rootless install inverts that. rootlesskit maps container uid 0 to the
+# invoking user and 1..65536 to the subuid range, so `ubuntu` becomes an id
+# that owns nothing: the monitor cannot open /dev/kvm and the guest cannot
+# write the workspace, which is its own home. Running as root is what puts the
+# guest back on the invoking user -- and files it creates land owned by that
+# user, not by root.
+#
+# Set here rather than in the Dockerfile because bunny ignores --build-arg, so
+# the bootable base cannot be parameterised. This stage is a plain docker
+# build, which can.
+ARG FINAL_USER=ubuntu
+ARG FINAL_HOME=/home/ubuntu
+USER ${FINAL_USER}
+WORKDIR ${FINAL_HOME}

@@ -372,6 +372,55 @@ jobs:
             "$STOCK_REF@$STOCK_DIGEST" > /dev/null
           echo "verified $STOCK_REF@$STOCK_DIGEST"
 
+      # The root variant, for a rootless brig install.
+      #
+      # rootlesskit maps container uid 0 to the invoking user and 1..65536 to
+      # that user's subuid range. So a guest on uid 1000 lands on an id that
+      # owns nothing: the monitor cannot open /dev/kvm and the guest cannot
+      # write the workspace that is its own home. A guest on root *is* the
+      # invoking user, and the files it writes arrive owned by that user.
+      #
+      # Built in this job for the same reason the stock variant is: both come
+      # from one base, one set of guest binaries and one commit. Only the final
+      # USER and WORKDIR differ, which is one layer.
+      #
+      # claude-ubuntu only for now. The other agents build their own account at
+      # a uid the Dockerfile picks, so moving them to root is a larger change
+      # than a final USER.
+      - name: Build and check ${{ matrix.image }}-root
+        if: matrix.image == 'claude-ubuntu'
+        run: |
+          set -euo pipefail
+          echo "ROOT_REF=$REGISTRY/${{ matrix.image }}-root:${{ matrix.arch }}" >> "$GITHUB_ENV"
+          make -C "images/${{ matrix.image }}" root check-root \
+            PLATFORM="linux/${{ matrix.arch }}" \
+            ROOT_IMAGE="$REGISTRY/${{ matrix.image }}-root:${{ matrix.arch }}" \
+            REVISION="$GITHUB_SHA"
+
+      - name: Push ${{ matrix.image }}-root
+        if: matrix.image == 'claude-ubuntu' && steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          make -C "images/${{ matrix.image }}" push-root ROOT_IMAGE="$ROOT_REF"
+          crane tag "$ROOT_REF" "${{ matrix.arch }}-${GITHUB_SHA::7}"
+          ROOT_DIGEST="$(crane digest "$ROOT_REF")"
+          echo "ROOT_DIGEST=$ROOT_DIGEST" >> "$GITHUB_ENV"
+          echo "published $ROOT_REF@$ROOT_DIGEST"
+
+      - name: Sign and attest ${{ matrix.image }}-root
+        if: matrix.image == 'claude-ubuntu' && steps.mode.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          .github/scripts/retry.sh cosign sign --yes "$ROOT_REF@$ROOT_DIGEST"
+          syft "$ROOT_REF@$ROOT_DIGEST" -o spdx-json > sbom-root.spdx.json
+          .github/scripts/retry.sh cosign attest --yes --type spdxjson \
+            --predicate sbom-root.spdx.json "$ROOT_REF@$ROOT_DIGEST"
+          .github/scripts/retry.sh cosign verify \
+            --certificate-identity-regexp "$COSIGN_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$ROOT_REF@$ROOT_DIGEST" > /dev/null
+          echo "verified $ROOT_REF@$ROOT_DIGEST"
+
       # The uid variants, for a host whose first human user is not macOS's 501.
       #
       # This is not cosmetic and it is not fixable at boot. hull resolves the
