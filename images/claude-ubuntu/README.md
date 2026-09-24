@@ -11,14 +11,16 @@ brig.
 
 ```bash
 docker pull ghcr.io/brig-sh/claude-ubuntu-stock          # ordinary container
-docker pull ghcr.io/brig-sh/claude-ubuntu-stock:amd64-root   # the same, on root
+docker pull ghcr.io/brig-sh/claude-ubuntu-stock:root     # the same, on root
 docker pull ghcr.io/brig-sh/claude-ubuntu                # bootable guest image
 ```
 
 ## The root tag
 
-`-stock:<arch>-root` is the same image ending on `root` in `/root` instead of
-`ubuntu` in `/home/ubuntu`. It is for a **rootless** brig install, where
+`-stock:root` is the same image ending on `root` in `/root` instead of
+`ubuntu` in `/home/ubuntu`. It is a multi-arch index, like `:latest`, so one
+reference works on both architectures -- the per-arch `-stock:<arch>-root`
+tags it is assembled from are still there if you want to pin one. It is for a **rootless** brig install, where
 1000:1000 stops being the right answer.
 
 rootlesskit maps container uid 0 to the invoking user and 1..65536 to that

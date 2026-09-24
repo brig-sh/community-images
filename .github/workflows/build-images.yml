@@ -591,12 +591,15 @@ jobs:
   manifest:
     name: ${{ matrix.image }} (index)
     needs: [select, build]
-    # Only the bootable images carry a per-arch guest kernel and therefore need
-    # an index; the stock images are ordinary and resolve on their own. So this
-    # follows the bootable build and is opt-in with it.
+    # This job indexes the stock package and its variants as well as the
+    # bootable one, so it is not opt-in with the bootable build. Making it so
+    # left -stock:latest pointing at whatever it pointed at before, which is
+    # the tag consumers actually pull. Only the bootable index inside is
+    # conditional now.
     if: >-
       needs.select.outputs.images != '[]' &&
-      github.event_name == 'workflow_dispatch' && inputs.bootable && inputs.push
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.push))
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -654,6 +657,7 @@ jobs:
         if: steps.mode.outputs.publish == 'true'
         env:
           IMAGE_NAME: ${{ matrix.image }}
+          BOOTABLE: ${{ github.event_name == 'workflow_dispatch' && inputs.bootable }}
         run: |
           set -euo pipefail
 
@@ -672,13 +676,24 @@ jobs:
             crane manifest "$ref:$tag" | jq -r '.manifests[] | "  \(.platform.os)/\(.platform.architecture) \(.digest)"'
           }
 
-          for REF in "$REGISTRY/$IMAGE_NAME" "$REGISTRY/$IMAGE_NAME-stock"; do
-            index "$REF" latest ""
-          done
+          # The bootable package only has per-arch tags to stitch when the
+          # bootable build ran, which is opt-in.
+          if [ "$BOOTABLE" = "true" ]; then
+            index "$REGISTRY/$IMAGE_NAME" latest ""
+          fi
+          index "$REGISTRY/$IMAGE_NAME-stock" latest ""
 
-          # The uid variants are published for the stock package only; see the
-          # bunny note in the build job.
+          # The uid and account variants are published for the stock package
+          # only; see the bunny note in the build job. Both get an index for the
+          # same reason :latest does: without one a consumer has to name an
+          # architecture, and a profile that names one stops working on the
+          # other machine.
           ALT_UIDS="$(make -C "images/$IMAGE_NAME" --no-print-directory alt-uids)"
           for uid in $ALT_UIDS; do
             index "$REGISTRY/$IMAGE_NAME-stock" "uid$uid" "-uid$uid"
+          done
+
+          ALT_USERS="$(make -C "images/$IMAGE_NAME" --no-print-directory alt-users)"
+          for user in $ALT_USERS; do
+            index "$REGISTRY/$IMAGE_NAME-stock" "$user" "-$user"
           done
