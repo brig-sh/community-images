@@ -102,11 +102,20 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
 # uid 501 is the first human user on macOS. Files the agent writes to a
 # virtiofs share (its persistent home, a mounted project directory) then
 # carry the host user's ownership and stay writable from both sides.
+# AGENT_USER is declared here rather than beside the USER line at the bottom
+# because this step has to know it. The root variant needs no account
+# created: root is already here, with a home and with sudo, and
+# `useradd -u 0` fails outright with "UID 0 is not unique".
 ARG AGENT_UID=501
-RUN useradd -m -u ${AGENT_UID} -s /bin/bash cursor \
- && mkdir -p /work && chown cursor:cursor /work \
- && printf 'cursor ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/cursor \
- && chmod 0440 /etc/sudoers.d/cursor
+ARG AGENT_USER=cursor
+RUN if [ "${AGENT_USER}" = root ]; then \
+        mkdir -p /work; \
+    else \
+        useradd -m -u ${AGENT_UID} -s /bin/bash cursor \
+     && mkdir -p /work && chown cursor:cursor /work \
+     && printf 'cursor ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/cursor \
+     && chmod 0440 /etc/sudoers.d/cursor; \
+    fi
 
 # The agent package, fetched from the same URL cursor.com/install resolves to
 # but with the version pinned here rather than whatever the script points at
@@ -142,6 +151,21 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     TERM=xterm-256color
 
-USER cursor
-WORKDIR /home/cursor
+# The account the image ends on. `cursor` is the answer on a root brig
+# install: the agent is the host's own user and the workspace stays that
+# user's.
+#
+# A rootless install inverts it. rootlesskit maps container uid 0 to the
+# invoking user and 1..65536 to that user's subuid range, so a guest on 501
+# lands on a host id that owns nothing: the monitor cannot open /dev/kvm and
+# the guest cannot write the workspace that is its own home. On root the
+# guest is the invoking user, and the files it writes arrive owned by that
+# user.
+#
+# Like AGENT_UID above, this reaches the stock build only. bunny ignores
+# --build-arg, so the bootable variant stays on `cursor` whatever is passed
+# here, and `check` asserts that rather than trusting it.
+ARG AGENT_HOME=/home/cursor
+USER ${AGENT_USER}
+WORKDIR ${AGENT_HOME}
 CMD ["/bin/bash"]
