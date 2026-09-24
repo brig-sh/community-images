@@ -12,7 +12,28 @@ brig.
 ```bash
 docker pull ghcr.io/brig-sh/claude-ubuntu-stock   # ordinary container
 docker pull ghcr.io/brig-sh/claude-ubuntu         # bootable guest image
+docker pull ghcr.io/brig-sh/claude-ubuntu-root    # bootable, on root
 ```
+
+## The root variant
+
+`claude-ubuntu-root` is the same bootable image ending on `root` in `/root`
+instead of `ubuntu` in `/home/ubuntu`. It exists for a **rootless** brig
+install, where 1000:1000 stops being the right answer.
+
+rootlesskit maps container uid 0 to the invoking user and 1..65536 to that
+user's subuid range. On uid 1000 the guest therefore lands on a host id that
+owns nothing, and two things fail: the monitor cannot open `/dev/kvm`, and the
+guest cannot write the workspace that is its own home. On root the guest *is*
+the invoking user, so both work and the files it writes arrive owned by that
+user rather than by root.
+
+On a root install the plain image is still the one to use: there container uid
+1000 is the host's own 1000, which is the whole point of it.
+
+The account is set in `Dockerfile.overlay` rather than in the `Dockerfile`,
+because bunny ignores `--build-arg` and the bootable base cannot be
+parameterised. The overlay is a plain docker build, which can.
 
 ## Why this exists beside claude-code
 
