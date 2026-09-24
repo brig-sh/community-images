@@ -27,7 +27,6 @@ a bring-your-own image; see [docs/bring-your-own-image.md](docs/bring-your-own-i
 | --- | --- | --- | --- |
 | Claude Code | `claude` | Anthropic | `ghcr.io/brig-sh/claude-code` |
 | Claude Code (ubuntu account) | `claude` | Anthropic | `ghcr.io/brig-sh/claude-ubuntu` |
-| Claude Code (root account) | `claude` | Anthropic | `ghcr.io/brig-sh/claude-ubuntu-root` |
 | Codex | `codex` | OpenAI | `ghcr.io/brig-sh/codex` |
 | Gemini CLI | `gemini` | Google | `ghcr.io/brig-sh/gemini` |
 | Grok CLI | `grok` | xAI | `ghcr.io/brig-sh/grok` |
@@ -194,10 +193,10 @@ Its images carry no uid tag because there is only one uid to have.
 A rootless brig install wants the opposite. rootlesskit maps container uid 0 to
 the invoking user and everything above it to a subuid, so a guest on 1000 owns
 nothing on the host: it cannot open `/dev/kvm` and cannot write its own home.
-[`claude-ubuntu-root`](images/claude-ubuntu) is the same bootable image ending
-on `root`, which puts the guest back on the invoking user and makes the files
-it writes that user's. Use the plain image on a root install and the root
-variant on a rootless one.
+`claude-ubuntu-stock:<arch>-root` is the same image ending on `root`, which
+puts the guest back on the invoking user and makes the files it writes that
+user's. Use the plain image on a root install and the root tag on a rootless
+one.
 
 Prefer `:latest` or a digest. Pulling the wrong architecture here is worse
 than usual: each one bundles a different guest kernel, so it does not merely

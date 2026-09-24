@@ -46,15 +46,6 @@ BASE_TAG    ?= brig-$(AGENT):base-$(TAG)
 # claim here is that the two variants contain the same thing.
 STOCK_IMAGE ?= $(REGISTRY)/$(AGENT)-stock:$(TAG)
 
-# The root variant: the same bootable image with its final account moved to
-# root, for a rootless brig install. rootlesskit maps container uid 0 to the
-# invoking user, so a root guest is that user -- it can open /dev/kvm and it
-# owns the workspace, and the files it writes land owned by that user rather
-# than by root. A uid-1000 guest lands on a subuid that owns neither.
-ROOT_IMAGE  ?= $(REGISTRY)/$(AGENT)-root:$(TAG)
-ROOT_TITLE  ?= $(AGENT) (root account)
-ROOT_DESC   ?= $(AGENT) as a bootable brig guest image, on root for a rootless brig install
-
 # uid 501 is the first human user on macOS. Files the agent writes to a
 # virtiofs share (its persistent home, a mounted project) then land with the
 # host user's ownership and stay writable both ways.
@@ -79,6 +70,28 @@ AGENT_UID   ?= 501
 # on 1000, which fails outright there; images/claude-code/Dockerfile has the
 # note on what that costs and how it is handled.
 ALT_UIDS    ?=
+
+# Extra accounts to publish the stock image on, as `-stock:<arch>-<user>`. A
+# rootless brig install needs one on root: rootlesskit maps container uid 0 to
+# the invoking user, so a root guest is that user -- it opens /dev/kvm and owns
+# the workspace, and what it writes arrives owned by that user. A guest on 1000
+# lands on a subuid that owns neither.
+#
+# Stock only, for the same reason the uid variants are: bunny ignores
+# --build-arg, so a bootable image on another account cannot be built this way.
+ALT_USERS   ?=
+
+# What an unset account means is the image's business, not this file's: an
+# image that names one here overrides its Dockerfile's default, and one that
+# leaves these alone keeps it.
+AGENT_USER  ?=
+AGENT_HOME  ?=
+
+# Passed only when set. `--build-arg AGENT_USER=` is not "leave the default
+# alone", it is "the account is the empty string", and docker takes it
+# literally: the image ends on USER with nothing after it.
+account_args = $(if $(AGENT_USER),--build-arg AGENT_USER=$(AGENT_USER)) \
+               $(if $(AGENT_HOME),--build-arg AGENT_HOME=$(AGENT_HOME))
 
 SOURCE_URL  ?= https://github.com/brig-sh/community-images
 REVISION    ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -199,8 +212,7 @@ urunc_src   = $(if $(URUNC_SRC),$(abspath $(URUNC_SRC)),$(CURDIR)/$(BUILD_DIR)/s
 urunit_src  = $(if $(URUNIT_SRC),$(abspath $(URUNIT_SRC)),$(CURDIR)/$(BUILD_DIR)/src/urunit)
 
 .PHONY: all build sources base binaries overlay check push clean \
-        stock check-stock push-stock alt-uids \
-        root check-root push-root
+        stock check-stock push-stock alt-uids alt-users
 
 all: build check push
 
@@ -349,6 +361,7 @@ stock: | $(BUILD_DIR)
 	sed '/^#[[:space:]]*syntax=/d' Dockerfile > $(BUILD_DIR)/Dockerfile.stock
 	DOCKER_BUILDKIT=1 docker build --platform $(PLATFORM) \
 		--build-arg AGENT_UID=$(AGENT_UID) \
+		$(account_args) \
 		--provenance=false --sbom=false \
 		--label org.opencontainers.image.source="$(SOURCE_URL)" \
 		--label org.opencontainers.image.revision="$(REVISION)" \
@@ -386,50 +399,14 @@ push-stock:
 	crane push $(BUILD_DIR)/stock.tar $(STOCK_IMAGE)
 	rm -f $(BUILD_DIR)/stock.tar
 
-# --- the root variant ------------------------------------------------------
-# Re-runs the overlay against the base and binaries this build already
-# produced, so the two bootable variants differ in exactly one layer and come
-# from one Dockerfile, one commit and one resolution of the base image. Only
-# the final USER and WORKDIR move; see Dockerfile.overlay for why it has to
-# happen here rather than in the Dockerfile.
-root:
-	@test -f $(BUILD_DIR)/urunit -a -f $(BUILD_DIR)/urunit-agent \
-		|| { echo "run 'make binaries' first"; exit 1; }
-	DOCKER_BUILDKIT=1 docker build --platform $(PLATFORM) \
-		--build-arg BASE=$(BASE_TAG) \
-		--build-arg SOURCE_URL=$(SOURCE_URL) \
-		--build-arg REVISION=$(REVISION) \
-		--build-arg FINAL_USER=root \
-		--build-arg FINAL_HOME=/root \
-		--build-arg TITLE="$(ROOT_TITLE)" \
-		--build-arg DESCRIPTION="$(ROOT_DESC)" \
-		--label sh.brig.variant="root" \
-		--provenance=false --sbom=false \
-		-t $(ROOT_IMAGE) -f Dockerfile.overlay .
-
-# The whole point of the variant is the account, so assert it rather than
-# trust the build arg reached the stage that sets it.
-check-root:
-	@echo "==> checking $(ROOT_IMAGE)"
-	@u="$$(docker inspect --format '{{.Config.User}}' $(ROOT_IMAGE))"; \
-		[ "$$u" = "root" ] \
-		|| { echo "$(ROOT_IMAGE) ends on '$$u', not root"; exit 1; }
-	@w="$$(docker inspect --format '{{.Config.WorkingDir}}' $(ROOT_IMAGE))"; \
-		[ "$$w" = "/root" ] \
-		|| { echo "$(ROOT_IMAGE) works in '$$w', not /root"; exit 1; }
-	$(call assert_toolchain,$(ROOT_IMAGE))
-	@echo "    ok: ends on root in /root, $(CLI) on PATH"
-
-push-root:
-	docker save $(ROOT_IMAGE) -o $(BUILD_DIR)/root.tar
-	crane push $(BUILD_DIR)/root.tar $(ROOT_IMAGE)
-	rm -f $(BUILD_DIR)/root.tar
-
 # What CI loops over to build this image's extra uids. Prints nothing when
 # there are none, so a `for` over it runs zero times rather than once on an
 # empty word.
 alt-uids:
 	@echo $(ALT_UIDS)
+
+alt-users:
+	@echo $(ALT_USERS)
 
 clean:
 	rm -rf $(BUILD_DIR)

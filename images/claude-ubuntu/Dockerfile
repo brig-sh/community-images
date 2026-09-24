@@ -147,6 +147,21 @@ ENV LANG=C.UTF-8 \
     DISABLE_AUTOUPDATER=1 \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
-USER ubuntu
-WORKDIR /home/ubuntu
+# The account the image ends on. `ubuntu` is the answer on a root brig install:
+# container uid 1000 is the host's own 1000, so the workspace is the user's and
+# stays that way.
+#
+# A rootless install inverts it. rootlesskit maps container uid 0 to the
+# invoking user and 1..65536 to that user's subuid range, so a guest on 1000
+# lands on a host id that owns nothing: the monitor cannot open /dev/kvm and
+# the guest cannot write the workspace that is its own home. On root the guest
+# is the invoking user, and the files it writes arrive owned by that user.
+#
+# Like AGENT_UID elsewhere in this repo, this reaches the stock build only.
+# bunny ignores --build-arg, so the bootable variant stays on `ubuntu` whatever
+# is passed here, and `check` asserts that rather than trusting it.
+ARG AGENT_USER=ubuntu
+ARG AGENT_HOME=/home/ubuntu
+USER ${AGENT_USER}
+WORKDIR ${AGENT_HOME}
 CMD ["/bin/bash"]

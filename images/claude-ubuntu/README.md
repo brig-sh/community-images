@@ -10,16 +10,16 @@ as is already there and already on the uid that matches whoever is running
 brig.
 
 ```bash
-docker pull ghcr.io/brig-sh/claude-ubuntu-stock   # ordinary container
-docker pull ghcr.io/brig-sh/claude-ubuntu         # bootable guest image
-docker pull ghcr.io/brig-sh/claude-ubuntu-root    # bootable, on root
+docker pull ghcr.io/brig-sh/claude-ubuntu-stock          # ordinary container
+docker pull ghcr.io/brig-sh/claude-ubuntu-stock:amd64-root   # the same, on root
+docker pull ghcr.io/brig-sh/claude-ubuntu                # bootable guest image
 ```
 
-## The root variant
+## The root tag
 
-`claude-ubuntu-root` is the same bootable image ending on `root` in `/root`
-instead of `ubuntu` in `/home/ubuntu`. It exists for a **rootless** brig
-install, where 1000:1000 stops being the right answer.
+`-stock:<arch>-root` is the same image ending on `root` in `/root` instead of
+`ubuntu` in `/home/ubuntu`. It is for a **rootless** brig install, where
+1000:1000 stops being the right answer.
 
 rootlesskit maps container uid 0 to the invoking user and 1..65536 to that
 user's subuid range. On uid 1000 the guest therefore lands on a host id that
@@ -29,11 +29,11 @@ the invoking user, so both work and the files it writes arrive owned by that
 user rather than by root.
 
 On a root install the plain image is still the one to use: there container uid
-1000 is the host's own 1000, which is the whole point of it.
+1000 is the host's own 1000, which is the point of this image.
 
-The account is set in `Dockerfile.overlay` rather than in the `Dockerfile`,
-because bunny ignores `--build-arg` and the bootable base cannot be
-parameterised. The overlay is a plain docker build, which can.
+Stock only. bunny ignores `--build-arg`, so the bootable image stays on
+`ubuntu` whatever is passed, and `check` asserts that rather than trusting it.
+brig boots the stock image anyway, through `genericBoot`.
 
 ## Why this exists beside claude-code
 

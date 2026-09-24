@@ -10,4 +10,9 @@ CLI   := claude
 # too, because nothing here depends on a build argument bunny would ignore.
 AGENT_UID := 1000
 
+# A rootless brig install needs the guest on root; see ALT_USERS in ../agent.mk.
+# Published as claude-ubuntu-stock:<arch>-root, stock only, because bunny
+# ignores --build-arg and the bootable image cannot take it.
+ALT_USERS := root
+
 include ../agent.mk
