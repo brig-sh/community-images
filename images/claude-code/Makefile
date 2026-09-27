@@ -14,4 +14,8 @@ ALT_UIDS := 1000
 # --build-arg and the bootable image cannot take it.
 ALT_USERS := root
 
+# The Dockerfile ARG that picks the Claude Code release; see CLI_VERSION in
+# ../agent.mk.
+CLI_VERSION_ARG := CLAUDE_VERSION
+
 include ../agent.mk

@@ -285,6 +285,7 @@ unprivileged user. Useful knobs, all overridable on the command line:
 | `PLATFORM` | `linux/arm64` | Build platform (`linux/amd64` also builds the guest kernel) |
 | `AGENT_UID` | `501` | uid of the in-guest user (`1000` for a Linux host) |
 | `ALT_UIDS` | (empty) | extra uids CI also publishes this image under |
+| `CLI_VERSION` | (empty) | agent CLI release for an image that names its ARG in `CLI_VERSION_ARG` (the Claude images: `CLAUDE_VERSION`); empty keeps the Dockerfile's default |
 | `URUNC_SRC` / `URUNIT_SRC` | cloned into `dist/src` | Guest init checkouts |
 
 `AGENT_UID` defaults to 501 because that is the first human user on macOS.

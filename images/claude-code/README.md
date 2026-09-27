@@ -54,8 +54,12 @@ make build check
 `check` asserts the image has a guest kernel, its urunc metadata, both guest
 binaries, and a `claude` the unprivileged user can run.
 
-Pinned at `CLAUDE_VERSION=stable`. Bump it deliberately, in a pull request -- CI
-builds the new version and runs it before anything reaches the registry.
+Tracks the current release: `CLAUDE_VERSION` defaults to `latest`, which the
+installer resolves at build time. The in-guest auto-updater is off, so an image
+carries the release that was newest when it was built. To pick up a newer one,
+run `Build images` on main with `image=claude-code` and `push` on. Its
+`claude_version` input takes `latest`, `stable` or an exact version for that
+run, and CI runs the result before it reaches the registry.
 
 See the [top-level README](../../README.md) for the knobs, how the two build
 stages fit together, and how to verify what we publish.

@@ -12,6 +12,8 @@ name: Build images
 #   push to main      build the changed images and publish them. This is the
 #                     "CI publishes on change" path.
 #   workflow_dispatch build one image or all of them, publish with push=true.
+#                     claude_version picks the Claude Code release for the
+#                     two Claude images.
 #
 # Publishing needs no registry secret: the built-in GITHUB_TOKEN carries
 # packages: write. Signing needs no key either -- cosign takes a short-lived
@@ -53,6 +55,10 @@ on:
         description: "Also build the bunny bootable images"
         type: boolean
         default: false
+      claude_version:
+        description: "Claude Code release for claude-code and claude-ubuntu: latest, stable or an exact version. Empty keeps the Dockerfile default"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -238,8 +244,26 @@ jobs:
       matrix:
         image: ${{ fromJSON(needs.select.outputs.images) }}
         arch: [arm64, amd64]
+    # A dispatch can pick the Claude Code release. Only the Claude images read
+    # it: agent.mk passes it as their CLAUDE_VERSION, and every other image
+    # gets an empty value, which leaves its Dockerfile alone.
+    env:
+      CLI_VERSION: ${{ github.event_name == 'workflow_dispatch' && startsWith(matrix.image, 'claude-') && inputs.claude_version || '' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      # make pastes CLI_VERSION into a shell command line, so only the forms
+      # the Claude installer accepts get that far.
+      - name: Check the Claude Code release input
+        if: env.CLI_VERSION != ''
+        run: |
+          set -euo pipefail
+          if ! printf '%s\n' "$CLI_VERSION" \
+               | grep -Eqx 'stable|latest|[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?'; then
+            echo "claude_version must be latest, stable or a version such as 2.1.283, not '$CLI_VERSION'" >&2
+            exit 1
+          fi
+          echo "Claude Code release: $CLI_VERSION"
 
       # All three come from GitHub releases, pinned, through one helper that
       # retries and checks a sha256. The packaged installers do none of that;
