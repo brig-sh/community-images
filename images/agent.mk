@@ -93,6 +93,14 @@ AGENT_HOME  ?=
 account_args = $(if $(AGENT_USER),--build-arg AGENT_USER=$(AGENT_USER)) \
                $(if $(AGENT_HOME),--build-arg AGENT_HOME=$(AGENT_HOME))
 
+# The agent CLI release to install, for an image that takes one. The image
+# names its Dockerfile ARG in CLI_VERSION_ARG; CI sets CLI_VERSION from the
+# dispatch input. Passed only when both are set, for the reason above: an
+# empty value would replace the Dockerfile's default with the empty string.
+CLI_VERSION     ?=
+CLI_VERSION_ARG ?=
+version_args = $(if $(and $(CLI_VERSION),$(CLI_VERSION_ARG)),--build-arg $(CLI_VERSION_ARG)=$(CLI_VERSION))
+
 SOURCE_URL  ?= https://github.com/brig-sh/community-images
 REVISION    ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 
@@ -362,6 +370,7 @@ stock: | $(BUILD_DIR)
 	DOCKER_BUILDKIT=1 docker build --platform $(PLATFORM) \
 		--build-arg AGENT_UID=$(AGENT_UID) \
 		$(account_args) \
+		$(version_args) \
 		--provenance=false --sbom=false \
 		--label org.opencontainers.image.source="$(SOURCE_URL)" \
 		--label org.opencontainers.image.revision="$(REVISION)" \

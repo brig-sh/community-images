@@ -121,15 +121,17 @@ RUN mkdir -p /work && chown ubuntu:ubuntu /work \
 # where the installer puts it (~/.local/bin), because a host directory gets
 # mounted over /home/ubuntu at boot -- anything under the home disappears.
 #
-# "stable" tracks Anthropic's stable channel at build time; pass an exact
-# version to pin. The in-guest auto-updater is off either way, so whatever is
-# baked here is what runs until the next rebuild.
+# "latest" takes Anthropic's newest release at build time, because Claude Code
+# ships support for a new model in a point release and the stable channel
+# trails it. Pass "stable" or an exact version to pin. The in-guest
+# auto-updater is off either way, so whatever is baked here is what runs until
+# the next rebuild.
 #
 # Run as `ubuntu` rather than as root: the installer writes into $HOME and
 # resolves its own platform, and running it as the account that will use it is
 # the shape it expects. The binary is then moved out of the home as root,
 # because the home is what the mount covers.
-ARG CLAUDE_VERSION=stable
+ARG CLAUDE_VERSION=latest
 USER ubuntu
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_VERSION}" \
  && /home/ubuntu/.local/bin/claude --version

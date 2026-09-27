@@ -141,10 +141,12 @@ RUN if [ "${AGENT_USER}" = root ]; then \
 # where the installer puts it (~/.local/bin), because a host directory gets
 # mounted over /home/claude at boot -- anything under the home disappears.
 #
-# "stable" tracks Anthropic's stable channel at build time; pass an exact
-# version to pin. The in-guest auto-updater is off either way, so whatever is
-# baked here is what runs until the next rebuild.
-ARG CLAUDE_VERSION=stable
+# "latest" takes Anthropic's newest release at build time, because Claude Code
+# ships support for a new model in a point release and the stable channel
+# trails it. Pass "stable" or an exact version to pin. The in-guest
+# auto-updater is off either way, so whatever is baked here is what runs until
+# the next rebuild.
+ARG CLAUDE_VERSION=latest
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_VERSION}" \
  && install -m 0755 "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
  && rm -rf /root/.local/share/claude /root/.local/bin/claude /root/.claude* \
