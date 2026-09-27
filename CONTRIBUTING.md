@@ -18,8 +18,9 @@ than that, the build tooling is wrong and we would rather hear about it.
    directory and image name, `CLI` is the binary `make check` looks for.
 
 3. Edit `images/myagent/Dockerfile`. Change the user name, the install stanza,
-   and the header comment. Pin the CLI version in an `ARG`, and run it once
-   with `--version` at the end of the install layer.
+   and the header comment. Take the CLI version from an `ARG` (see below for
+   its default), and run it once with `--version` at the end of the install
+   layer.
 
 4. Edit `images/myagent/Dockerfile.overlay` -- only the `LABEL` block, to name
    the agent.
@@ -43,7 +44,9 @@ machine.
 
 Nothing exotic, but these come up:
 
-- The CLI version is pinned to an exact version, not `latest`.
+- The CLI version comes from an `ARG`. It defaults to `latest` for an agent
+  that gains new models and fixes through its own point releases (Claude Code,
+  codex, gemini, grok, opencode), and to an exact version otherwise (cursor).
 - The agent binary is installed outside `/home`. A host directory is mounted
   over the home at boot, so anything under there is gone at runtime.
 - No credential of any kind is baked into the image.
@@ -58,11 +61,16 @@ duplication.
 
 ## Bumping a version
 
-Change the `ARG` and open a pull request. CI builds it and `make check` runs
-the new CLI, so a broken bump fails before it reaches the registry.
+An image on `latest` takes a newer release when it is rebuilt: run
+`Build images` on main with the image and `push` on. The Claude images also
+take `claude_version` there, to pick `stable` or an exact version for that
+run. An image pinned to an exact version is bumped by changing its `ARG` in a
+pull request. Either way CI builds it and `make check` runs the new CLI, so a
+broken release fails before it reaches the registry.
 
-Bumps are deliberate rather than automated. An agent CLI that silently moves
-under you is exactly the thing these pinned images exist to prevent.
+Bumps are deliberate rather than automated. Nothing rebuilds on a schedule: an
+image changes when a build runs, from a dispatch or from a push to main that
+touches it.
 
 ## Commits
 
