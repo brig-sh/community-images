@@ -214,6 +214,16 @@ define assert_toolchain
 		echo "ok: rust toolchain writable by $$(id -un)"'
 endef
 
+# An image can add checks of its own: images/<agent>/check-cli.sh, piped into
+# the image and run by /bin/sh as the runtime user, in `check` and in
+# `check-stock` alike. codex uses it because `codex --version` passes on an
+# install that cannot start its TUI. An image without the file skips it.
+# It runs with no network, so a check that passes here does not depend on
+# reaching anything upstream.
+define check_cli
+	$(if $(wildcard check-cli.sh),@docker run --rm -i --network none --platform $(PLATFORM) --entrypoint /bin/sh $(1) -s < check-cli.sh)
+endef
+
 # Resolved lazily: an explicit *_SRC wins, otherwise use the checkout that
 # the `sources` target clones into dist/src.
 urunc_src   = $(if $(URUNC_SRC),$(abspath $(URUNC_SRC)),$(CURDIR)/$(BUILD_DIR)/src/urunc)
@@ -321,6 +331,7 @@ check:
 	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(IMAGE) -c '\
 		set -e; command -v $(CLI) >/dev/null || { echo "$(CLI) not on the runtime user PATH"; exit 1; }; \
 		echo "ok: $(CLI) runnable as $$(id -un)"'
+	$(call check_cli,$(IMAGE))
 	$(call assert_uid,$(IMAGE))
 	@# node, as the runtime user. The agents' skills and plugins shell out to
 	@# node and npx, so a guest missing either fails at the point of use with
@@ -395,6 +406,7 @@ check-stock:
 	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(STOCK_IMAGE) -c '\
 		set -e; command -v $(CLI) >/dev/null || { echo "$(CLI) not on the runtime user PATH"; exit 1; }; \
 		echo "ok: $(CLI) runnable as $$(id -un)"'
+	$(call check_cli,$(STOCK_IMAGE))
 	$(call assert_uid,$(STOCK_IMAGE))
 	@docker run --rm --platform $(PLATFORM) --entrypoint /bin/sh $(STOCK_IMAGE) -c '\
 		set -e; \
