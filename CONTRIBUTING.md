@@ -14,6 +14,10 @@ than that, the build tooling is wrong and we would rather hear about it.
    cp -r images/codex images/myagent
    ```
 
+   `images/codex/check-cli.sh` checks the layout of the codex package, and
+   `make check` runs any `check-cli.sh` it finds. Delete it from the copy, or
+   rewrite it for your agent.
+
 2. Edit `images/myagent/Makefile` -- it is four lines. `AGENT` is the
    directory and image name, `CLI` is the binary `make check` looks for.
 
