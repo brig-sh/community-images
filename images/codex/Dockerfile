@@ -109,17 +109,44 @@ RUN if [ "${AGENT_USER}" = root ]; then \
      && chmod 0440 /etc/sudoers.d/codex; \
     fi
 
-# Codex ships a static musl binary per release, so the CLI itself needs
-# nothing from the node installed above. Installed to /usr/local/bin rather
-# than the home directory, because a host directory gets mounted over
-# /home/codex at boot.
+# Codex from the package attached to the upstream GitHub release. codex
+# itself is a static musl binary, so it needs nothing from the node installed
+# above.
+#
+# The package, not the bare codex-<triple>.tar.gz binary. Since 0.156 the
+# TUI starts a background app server before it draws anything, and installs
+# that server from the package the running CLI came from. A bare binary has
+# none, and codex exits with "this CLI has no complete local package". The
+# package is bin/codex plus codex-package.json and the helpers codex checks
+# for; check-cli.sh asserts that layout.
+#
+# Under /usr/local/lib rather than the home directory, because a host
+# directory gets mounted over the home at boot. That also rules out upstream's
+# standalone installer, which puts the package under ~/.codex. On its first
+# start codex copies the package into ~/.codex itself.
+#
+# /usr/local/bin/codex is a symlink into the package. codex resolves its own
+# path through /proc/self/exe, so it still finds the manifest. Nothing else
+# goes into the package directory: codex hashes the whole tree, and refuses
+# it if a directory in it is a link.
+#
+# --no-same-owner because the archive's entries belong to the upstream build
+# user, and tar as root keeps that owner by default. a+rX because the first
+# start reads every file in the package as the runtime user.
 #
 # The asset name is a Rust target triple; map the dpkg architecture onto it
-# so one Dockerfile covers both. Pinned -- bump deliberately.
+# so one Dockerfile covers both. The download is checked against the
+# release's own SHA256SUMS. That proves the file arrived intact, not who made
+# it. When no line matches, sha256sum -c reads nothing and fails the layer.
+#
 # "latest" resolves the newest release at build time; set an explicit version
 # to pin. Unpinned by default so a rebuild picks up the current CLI -- the
 # whole point of rebuilding these images -- and the resolved version is echoed
-# into the log so a build can still be traced back to what it installed.
+# into the log so a build can still be traced back to what it installed. The
+# version is resolved once, so the package and its SHA256SUMS come from the
+# same release. `make check` runs check-cli.sh before anything is pushed, so a
+# release whose package codex rejects fails the build instead of reaching the
+# registry.
 ARG CODEX_VERSION=latest
 RUN arch="$(dpkg --print-architecture)" \
  && case "$arch" in \
@@ -134,12 +161,17 @@ RUN arch="$(dpkg --print-architecture)" \
       [ -n "$ver" ] || { echo "could not resolve the latest codex release" >&2; exit 1; }; \
       echo "codex: resolved latest to $ver"; \
     fi \
- && curl -fsSL -o /tmp/codex.tar.gz \
-      "https://github.com/openai/codex/releases/download/rust-v${ver}/codex-${rarch}-unknown-linux-musl.tar.gz" \
- && mkdir -p /tmp/codex-x && tar -xzf /tmp/codex.tar.gz -C /tmp/codex-x \
- && install -m 0755 /tmp/codex-x/codex* /usr/local/bin/codex \
- && rm -rf /tmp/codex.tar.gz /tmp/codex-x \
- && /usr/local/bin/codex --version
+ && url="https://github.com/openai/codex/releases/download/rust-v${ver}" \
+ && asset="codex-package-${rarch}-unknown-linux-musl.tar.gz" \
+ && mkdir -p /tmp/codex && cd /tmp/codex \
+ && curl -fsSL -O "${url}/${asset}" -O "${url}/codex-package_SHA256SUMS" \
+ && grep "  ${asset}\$" codex-package_SHA256SUMS | sha256sum -c - \
+ && mkdir -p /usr/local/lib/codex \
+ && tar -xzf "$asset" --no-same-owner -C /usr/local/lib/codex \
+ && chmod -R a+rX /usr/local/lib/codex \
+ && ln -s ../lib/codex/bin/codex /usr/local/bin/codex \
+ && cd / && rm -rf /tmp/codex \
+ && codex --version
 
 # No credential is baked, here or in any image in this repo. Sign in at
 # runtime with `codex login --device-auth`; the resulting ~/.codex/auth.json
