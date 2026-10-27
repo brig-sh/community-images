@@ -51,6 +51,8 @@ Nothing exotic, but these come up:
 - The CLI version comes from an `ARG`. It defaults to `latest` for an agent
   that gains new models and fixes through its own point releases (Claude Code,
   codex, gemini, grok, opencode), and to an exact version otherwise (cursor).
+  herd installs Claude Code on `latest` and pins herdr exactly, by version
+  and sha256, since herdr signs nothing.
 - The agent binary is installed outside `/home`. A host directory is mounted
   over the home at boot, so anything under there is gone at runtime.
 - No credential of any kind is baked into the image.

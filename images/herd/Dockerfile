@@ -21,7 +21,8 @@
 # manage many brig sandboxes as remote machines. One agent per sandbox.
 #
 # This is claude-code's Dockerfile with two differences: the agent runs as
-# root, and the herd stanzas below the Claude Code install. Copied rather than
+# root, and the herd stanzas above the Claude Code install, which tracks
+# latest and so rebuilds far more often than they change. Copied rather than
 # built FROM claude-code, so the file reads top to bottom (see CONTRIBUTING).
 #
 # The #syntax line above is what makes this more than a container: the bunny
@@ -108,21 +109,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
 # `guestHome:`, so a profile for this image says `guestHome: /root`.
 RUN mkdir -p /work
 
-# The native Claude Code binary. Installed to /usr/local/bin rather than left
-# where the installer puts it (~/.local/bin), because a host directory gets
-# mounted over the home (/root here) at boot -- anything under it disappears.
-#
-# "latest" takes Anthropic's newest release at build time, because Claude Code
-# ships support for a new model in a point release and the stable channel
-# trails it. Pass "stable" or an exact version to pin. The in-guest
-# auto-updater is off either way, so whatever is baked here is what runs until
-# the next rebuild.
-ARG CLAUDE_VERSION=latest
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_VERSION}" \
- && install -m 0755 "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
- && rm -rf /root/.local/share/claude /root/.local/bin/claude /root/.claude* \
- && /usr/local/bin/claude --version
-
 # sshd is the only transport herdr has for a remote machine. It is never
 # listening: herd-sshd runs it in inetd mode (-i) on the stdin and stdout of a
 # `brig exec`, so the guest opens no port and needs no network change.
@@ -179,10 +165,34 @@ RUN set -eu; \
 # herd-sshd carries the environment of the `brig exec` into every SSH session
 # (see the script for why). herdr panes are interactive non-login shells, which
 # read /etc/bash.bashrc and never /etc/profile.d, so the hook goes there.
+#
+# Only in a session sshd started. `brig sh` runs an interactive login bash,
+# which reads /etc/bash.bashrc too, and sourcing the file there would replace
+# the session token brig just minted with the one the last SSH connection
+# left, expired if that was over 12 hours ago. sshd sets SSH_CONNECTION, also
+# in -i mode on a pipe, and a herdr pane inherits it from the herdr server;
+# brig does not set it. The parent process is no test: a pane's is herdr.
 COPY herd-sshd /usr/local/sbin/herd-sshd
 RUN chmod 0755 /usr/local/sbin/herd-sshd \
- && printf '\n# herd: the environment brig forwarded, see /usr/local/sbin/herd-sshd\n[ -r /run/herd/env ] && . /run/herd/env\n' \
+ && printf '%s\n' '' \
+      '# herd: the environment brig forwarded, see /usr/local/sbin/herd-sshd' \
+      'if [ -n "${SSH_CONNECTION:-}" ] && [ -r /run/herd/env ]; then . /run/herd/env; fi' \
       >> /etc/bash.bashrc
+
+# The native Claude Code binary. Installed to /usr/local/bin rather than left
+# where the installer puts it (~/.local/bin), because a host directory gets
+# mounted over the home (/root here) at boot -- anything under it disappears.
+#
+# "latest" takes Anthropic's newest release at build time, because Claude Code
+# ships support for a new model in a point release and the stable channel
+# trails it. Pass "stable" or an exact version to pin. The in-guest
+# auto-updater is off either way, so whatever is baked here is what runs until
+# the next rebuild.
+ARG CLAUDE_VERSION=latest
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_VERSION}" \
+ && install -m 0755 "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
+ && rm -rf /root/.local/share/claude /root/.local/bin/claude /root/.claude* \
+ && /usr/local/bin/claude --version
 
 # No credential is baked, here or in any image in this repo. Claude Code
 # authenticates at runtime (`claude` walks you through it) and the resulting

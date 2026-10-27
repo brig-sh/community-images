@@ -27,7 +27,7 @@ Host herd*+*
   ForwardAgent no
   StrictHostKeyChecking yes
   UserKnownHostsFile /dev/null
-  KnownHostsCommand /bin/sh -c 'r=$(echo "$1" | sed "s/+/@/") && k=$(brig -q exec "$r" -- cat /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null) && echo "$1 $k"' sh %n
+  KnownHostsCommand /bin/sh -c 'r=$(echo "$1" | sed "s/+/@/") && k=$(brig -q exec "$r" -- cat /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null) && [ -n "$k" ] && echo "$1 $k"' sh %n
   LogLevel ERROR
   ProxyCommand sh -c 'exec brig -q exec "${1%%+*}@${1#*+}" -- /usr/local/sbin/herd-sshd 2>/dev/null' sh %n
 ```
@@ -54,8 +54,9 @@ account variant. The guest home is `/root`, as in brig's claude-code profile.
 **The environment crosses into the panes.** sshd starts each session clean,
 which would leave Claude Code in a herdr pane with no broker token and no CA
 bundle. `herd-sshd` writes the environment brig gave the exec to
-`/run/herd/env` (tmpfs, root, 0600) and `/etc/bash.bashrc` sources it. It is
-never written to the guest home, which is host disk. A pane keeps the values it
+`/run/herd/env` (tmpfs, root, 0600) and `/etc/bash.bashrc` sources it in an
+SSH session only, so `brig sh` keeps the token brig gave it. It is never
+written to the guest home, which is host disk. A pane keeps the values it
 started with; a new SSH connection refreshes the file for the next one.
 
 **Host keys change on every boot.** The image ships none -- baked keys would
@@ -78,7 +79,13 @@ make build check         # the bootable variant
 
 `check-cli.sh` adds the herd checks to both: herdr runs, sshd's effective
 config takes the empty root password with forwarding off, no host keys are
-baked in, and `/etc/bash.bashrc` sources the carried environment.
+baked in, and an interactive shell reads the carried environment only in an
+SSH session.
+
+herdr is pinned at `HERDR_VERSION=0.9.5`, with the sha256 of each release
+binary and of its LICENSE beside it in the Dockerfile. Bump all four together,
+deliberately, in a pull request -- CI builds the new version and runs it
+before anything reaches the registry.
 
 See the [top-level README](../../README.md) for the knobs, how the two build
 stages fit together, and how to verify what we publish.

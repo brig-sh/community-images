@@ -36,8 +36,19 @@ done
 # sshd accepts an empty password only for an account that has one.
 [ -z "$(getent shadow root | cut -d: -f2)" ] || fail "root has a password, so sshd will ask for a key"
 
-# herdr panes are interactive non-login shells; without this line they never
-# see the environment brig forwarded.
-grep -q '/run/herd/env' /etc/bash.bashrc || fail "/etc/bash.bashrc does not source /run/herd/env"
+# The bashrc hook, by behaviour: an interactive shell with SSH_CONNECTION set,
+# as in a herdr pane, reads /run/herd/env, and one without, as from `brig sh`,
+# does not. Without the hook a pane never sees the environment brig forwarded;
+# without the gate `brig sh` would swap its fresh session token for a stale one.
+mkdir -p /run/herd
+had_env=no
+[ -e /run/herd/env ] && had_env=yes && mv /run/herd/env /run/herd/env.check-cli
+echo 'export HERD_CHECK=sourced' >/run/herd/env
+got=$(SSH_CONNECTION='UNKNOWN 65535 UNKNOWN 65535' bash -ic 'echo "${HERD_CHECK:-unset}"' 2>/dev/null)
+[ "$got" = sourced ] || fail "an SSH session does not read /run/herd/env"
+got=$(env -u SSH_CONNECTION bash -ic 'echo "${HERD_CHECK:-unset}"' 2>/dev/null)
+[ "$got" = unset ] || fail "a shell outside SSH reads /run/herd/env"
+rm -f /run/herd/env
+[ "$had_env" = no ] || mv /run/herd/env.check-cli /run/herd/env
 
 echo "ok: $(herdr --version), sshd needs no key, no baked host keys"
