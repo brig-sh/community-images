@@ -1,0 +1,37 @@
+#!/bin/bash
+# The SSH end of a herd box. The host's ssh runs this through `brig exec` as
+# its ProxyCommand, and this hands the exec's stdin and stdout to sshd in inetd
+# mode. No port is opened and nothing listens.
+#
+# sshd starts every session with a clean environment, so without the step
+# below a herdr pane has no broker token, no CA bundle paths and no
+# CLAUDE_CONFIG_DIR, and Claude Code in it asks to log in. Everything this exec
+# received is carried, minus what the shell owns. An allowlist here fell
+# behind brig the first time brig added a variable (the CA paths), so this
+# does not mirror brig's list.
+#
+# The file is written to /run, which is tmpfs and root-only, never to the
+# guest home: the home is host disk, and the broker token must not land there.
+# A new SSH connection rewrites it; a pane that is already running keeps the
+# values it started with.
+set -euo pipefail
+umask 077
+mkdir -p /run/herd /run/sshd
+
+# The image ships no host keys: baked ones would be the same, public, key in
+# every herd box. The rootfs does not survive a stop, so a box gets new keys
+# on each boot. The lock stops two first connections generating at once.
+flock /run/herd/keygen.lock ssh-keygen -A >/dev/null
+
+tmp=$(mktemp /run/herd/env.XXXXXX)
+while IFS= read -r -d '' kv; do
+	k=${kv%%=*}
+	case $k in
+	PATH | HOME | PWD | OLDPWD | SHLVL | _ | TERM | HOSTNAME | USER | LOGNAME | SHELL) continue ;;
+	esac
+	[[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+	printf 'export %s=%q\n' "$k" "${kv#*=}" >>"$tmp"
+done </proc/self/environ
+mv -f "$tmp" /run/herd/env
+
+exec /usr/sbin/sshd -i

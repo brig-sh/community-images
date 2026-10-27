@@ -13,7 +13,7 @@ name: Build images
 #                     "CI publishes on change" path.
 #   workflow_dispatch build one image or all of them, publish with push=true.
 #                     claude_version picks the Claude Code release for the
-#                     two Claude images.
+#                     images that install Claude Code.
 #
 # Publishing needs no registry secret: the built-in GITHUB_TOKEN carries
 # packages: write. Signing needs no key either -- cosign takes a short-lived
@@ -45,7 +45,7 @@ on:
       image:
         description: "Image to build"
         type: choice
-        options: [all, claude-code, claude-ubuntu, codex, gemini, grok, opencode, cursor]
+        options: [all, claude-code, claude-ubuntu, codex, gemini, grok, opencode, herd, cursor]
         default: all
       push:
         description: "Publish to ghcr.io/brig-sh"
@@ -56,7 +56,7 @@ on:
         type: boolean
         default: false
       claude_version:
-        description: "Claude Code release for claude-code and claude-ubuntu: latest, stable or an exact version. Empty keeps the Dockerfile default"
+        description: "Claude Code release for claude-code, claude-ubuntu and herd: latest, stable or an exact version. Empty keeps the Dockerfile default"
         type: string
         default: ""
 
@@ -152,6 +152,10 @@ jobs:
               - "images/opencode/**"
               - "images/agent.mk"
               - ".github/workflows/build-images.yml"
+            herd:
+              - "images/herd/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
             cursor:
               - "images/cursor/**"
               - "images/agent.mk"
@@ -160,7 +164,7 @@ jobs:
       # The same diff, read narrowly: only the image's own directory, with the
       # shared files left out. A pull request uses this when it says anything,
       # so touching agent.mk or this workflow alongside one image builds that
-      # image rather than all seven.
+      # image rather than all eight.
       #
       # Pull requests only. A push to main keeps the wide reading and rebuilds
       # everything a shared file could reach, because that is the run that
@@ -184,6 +188,8 @@ jobs:
               - "images/grok/**"
             opencode:
               - "images/opencode/**"
+            herd:
+              - "images/herd/**"
             cursor:
               - "images/cursor/**"
 
@@ -201,7 +207,7 @@ jobs:
           CHANGED_OWN: ${{ steps.filter_own.outputs.changes }}
         run: |
           set -euo pipefail
-          PUBLISHABLE='["claude-code","claude-ubuntu","codex","gemini","grok","opencode"]'
+          PUBLISHABLE='["claude-code","claude-ubuntu","codex","gemini","grok","opencode","herd"]'
           if [ "$EVENT" = "workflow_dispatch" ]; then
             if [ "$INPUT_IMAGE" = "all" ]; then
               IMAGES="$PUBLISHABLE"
@@ -244,11 +250,11 @@ jobs:
       matrix:
         image: ${{ fromJSON(needs.select.outputs.images) }}
         arch: [arm64, amd64]
-    # A dispatch can pick the Claude Code release. Only the Claude images read
-    # it: agent.mk passes it as their CLAUDE_VERSION, and every other image
-    # gets an empty value, which leaves its Dockerfile alone.
+    # A dispatch can pick the Claude Code release. Only the images that install
+    # Claude Code read it: agent.mk passes it as their CLAUDE_VERSION, and every
+    # other image gets an empty value, which leaves its Dockerfile alone.
     env:
-      CLI_VERSION: ${{ github.event_name == 'workflow_dispatch' && startsWith(matrix.image, 'claude-') && inputs.claude_version || '' }}
+      CLI_VERSION: ${{ github.event_name == 'workflow_dispatch' && (startsWith(matrix.image, 'claude-') || matrix.image == 'herd') && inputs.claude_version || '' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 

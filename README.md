@@ -31,6 +31,7 @@ a bring-your-own image; see [docs/bring-your-own-image.md](docs/bring-your-own-i
 | Gemini CLI | `gemini` | Google | `ghcr.io/brig-sh/gemini` |
 | Grok CLI | `grok` | xAI | `ghcr.io/brig-sh/grok` |
 | opencode | `opencode` | OSS | `ghcr.io/brig-sh/opencode` |
+| herd (Claude Code + herdr) | `claude` | Anthropic | `ghcr.io/brig-sh/herd` |
 | Cursor Agent | `cursor-agent` | Cursor | not published, see below |
 
 Claude Code and Codex are the proven core. Gemini, Grok and opencode are
