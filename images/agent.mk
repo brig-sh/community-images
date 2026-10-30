@@ -111,7 +111,7 @@ URUNC_REPO  ?= https://github.com/urunc-dev/urunc
 # URUNC_REF is a commit, and it is the same commit two other repositories pin:
 #
 #   hull/go.mod       require github.com/urunc-dev/urunc <pseudo-version>
-#                     v0.8.1-0.20261006162953-6c062f39c5bb
+#                     v0.8.2-0.20261029205741-3c00b69ff9ac
 #   hull-assets/PINS  URUNC_REF
 #
 # Bump all three in one change. They are one pin written down three times
@@ -130,26 +130,23 @@ URUNC_REPO  ?= https://github.com/urunc-dev/urunc
 # hull-assets' ci/check-pin-coherence.sh compares the three and fails on
 # divergence, so a bump that misses one of them stops being something you find
 # out about from a guest.
-URUNC_REF   ?= 6c062f39c5bb0d0497408d99ed308e887b2220d3
+URUNC_REF   ?= 3c00b69ff9ac1b8bb260975cdc63d18a7043558b
 
 URUNIT_REPO ?= https://github.com/NOFireAI/urunit
 # A commit, for the same reason URUNC_REF is one: this is PID 1 in every
 # published, signed guest image, and while it was a branch two builds of the
 # same commit of this repository could ship two different inits.
 #
-# It is the commit hull-assets/PINS pins as URUNIT_REF:
+# It is the commit hull-assets/PINS pins as URUNIT_REF, and the one URUNC_REF
+# pins in packaging/container-initrd/urunit.pin:
 #
 #   hull-assets/PINS  URUNIT_REF
 #
-# On fix/controlling-tty rather than main on purpose -- main has neither the
-# controlling-terminal fix nor the reaping fix this path needs, so a guest
-# whose entrypoint exits would hang instead of powering off. Move both sides to
-# main once those land there, in one change.
-#
-# Not part of the urunc three-way contract above, and note that nothing checks
-# this one for you: hull-assets' ci/check-pin-coherence.sh compares URUNC_REF
-# across the three repositories and does not look at URUNIT_REF at all.
-URUNIT_REF  ?= 40a8bbe594a8e738d29b790d44292c38182a8099
+# It reads the urunit.conf that URUNC_REF writes, so the two move together.
+# It is on stack/10-acpi-power-button, since main does not carry the
+# single-binary urunit yet. hull-assets' ci/check-pin-coherence.sh compares
+# this URUNIT_REF with PINS too.
+URUNIT_REF  ?= 48a61bd480eb57871204523312127b06d0a05363
 
 BUILD_DIR   := dist
 
