@@ -59,6 +59,12 @@ SSH session only, so `brig sh` keeps the token brig gave it. It is never
 written to the guest home, which is host disk. A pane keeps the values it
 started with; a new SSH connection refreshes the file for the next one.
 
+**A pane starts in the project.** The same hook moves a shell that starts in
+`/root` to `$BRIG_PROJECT`, which brig sets to `/work/<name>` when the sandbox
+has a project, or to `/work` when brig sets none. A shell that starts
+anywhere else stays there, so a herdr split opens where the pane it came from
+was. A brig that predates `BRIG_PROJECT` sends every pane to `/work`.
+
 **Host keys change on every boot.** The image ships none -- baked keys would
 be the same public key in every herd box -- and the rootfs does not survive
 `brig stop`, so `herd-sshd` generates them on first connect. The ssh config

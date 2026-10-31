@@ -48,6 +48,25 @@ got=$(SSH_CONNECTION='UNKNOWN 65535 UNKNOWN 65535' bash -ic 'echo "${HERD_CHECK:
 [ "$got" = sourced ] || fail "an SSH session does not read /run/herd/env"
 got=$(env -u SSH_CONNECTION bash -ic 'echo "${HERD_CHECK:-unset}"' 2>/dev/null)
 [ "$got" = unset ] || fail "a shell outside SSH reads /run/herd/env"
+
+# The same hook moves a pane from HOME to the project brig names, or to /work
+# when it names none, and leaves a shell started anywhere else where it is: a
+# herdr split opens in the directory of the pane it came from. Outside SSH it
+# moves nothing, as `brig sh` already starts in the project.
+ssh='UNKNOWN 65535 UNKNOWN 65535'
+mkdir -p /tmp/herd-check-project /tmp/herd-check-elsewhere
+echo 'export BRIG_PROJECT=/tmp/herd-check-project' >/run/herd/env
+got=$(cd "$HOME" && SSH_CONNECTION=$ssh bash -ic pwd 2>/dev/null)
+[ "$got" = /tmp/herd-check-project ] || fail "an SSH session in HOME starts in $got, not BRIG_PROJECT"
+got=$(cd /tmp/herd-check-elsewhere && SSH_CONNECTION=$ssh bash -ic pwd 2>/dev/null)
+[ "$got" = /tmp/herd-check-elsewhere ] || fail "an SSH session outside HOME was moved to $got"
+got=$(cd "$HOME" && env -u SSH_CONNECTION bash -ic pwd 2>/dev/null)
+[ "$got" = "$HOME" ] || fail "a shell outside SSH was moved to $got"
+: >/run/herd/env
+got=$(cd "$HOME" && SSH_CONNECTION=$ssh bash -ic pwd 2>/dev/null)
+[ "$got" = /work ] || fail "an SSH session with no BRIG_PROJECT starts in $got, not /work"
+rm -rf /tmp/herd-check-project /tmp/herd-check-elsewhere
+
 rm -f /run/herd/env
 [ "$had_env" = no ] || mv /run/herd/env.check-cli /run/herd/env
 

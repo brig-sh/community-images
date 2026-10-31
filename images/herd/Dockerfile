@@ -172,11 +172,21 @@ RUN set -eu; \
 # left, expired if that was over 12 hours ago. sshd sets SSH_CONNECTION, also
 # in -i mode on a pipe, and a herdr pane inherits it from the herdr server;
 # brig does not set it. The parent process is no test: a pane's is herdr.
+#
+# The same gate moves the shell to the project. sshd and the herdr server start
+# in HOME, so without this every pane opens in /root rather than in the
+# project brig mounted. BRIG_PROJECT, which brig sets only when it mounted a
+# project, names it; without one, /work, where a project would be. Only from
+# HOME: herdr opens a split in the directory of the pane it came from, and a
+# shell started anywhere else was put there on purpose.
 COPY herd-sshd /usr/local/sbin/herd-sshd
 RUN chmod 0755 /usr/local/sbin/herd-sshd \
  && printf '%s\n' '' \
       '# herd: the environment brig forwarded, see /usr/local/sbin/herd-sshd' \
-      'if [ -n "${SSH_CONNECTION:-}" ] && [ -r /run/herd/env ]; then . /run/herd/env; fi' \
+      'if [ -n "${SSH_CONNECTION:-}" ]; then' \
+      '  if [ -r /run/herd/env ]; then . /run/herd/env; fi' \
+      '  if [ "$PWD" = "$HOME" ] && [ -d "${BRIG_PROJECT:-/work}" ]; then cd "${BRIG_PROJECT:-/work}"; fi' \
+      'fi' \
       >> /etc/bash.bashrc
 
 # The native Claude Code binary. Installed to /usr/local/bin rather than left
