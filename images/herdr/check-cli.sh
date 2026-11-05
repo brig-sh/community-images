@@ -1,11 +1,11 @@
-# Asserts what a herd box adds to claude-code. agent.mk pipes this into the
+# Asserts what a herdr box adds to claude-code. agent.mk pipes this into the
 # built image as its runtime user, with no network, so it is plain sh and
 # reads nothing from the host.
 
 set -eu
 
 fail() {
-	echo "herd: $*" >&2
+	echo "herdr: $*" >&2
 	exit 1
 }
 
@@ -14,13 +14,13 @@ herdr --version >/dev/null || fail "herdr does not run"
 [ -s /usr/share/licenses/herdr/LICENSE ] || fail "no herdr LICENSE"
 
 [ -x /usr/sbin/sshd ] || fail "no sshd"
-[ -x /usr/local/sbin/herd-sshd ] || fail "no herd-sshd"
+[ -x /usr/local/sbin/herdr-sshd ] || fail "no herdr-sshd"
 
-# A host key in the image would be the same key in every herd box.
+# A host key in the image would be the same key in every herdr box.
 ! ls /etc/ssh/ssh_host_*_key >/dev/null 2>&1 || fail "the image carries ssh host keys"
 
 # The settings that let the host in with no key and keep its agent out,
-# read from sshd's effective config rather than from herd.conf: sshd takes the
+# read from sshd's effective config rather than from herdr.conf: sshd takes the
 # first value it reads, so an earlier file could override ours. -T needs a
 # host key to load, so it gets a throwaway one.
 tmp=$(mktemp -d)
@@ -37,18 +37,18 @@ done
 [ -z "$(getent shadow root | cut -d: -f2)" ] || fail "root has a password, so sshd will ask for a key"
 
 # The bashrc hook, by behaviour: an interactive shell with SSH_CONNECTION set,
-# as in a herdr pane, reads /run/herd/env, and one without, as from `brig sh`,
+# as in a herdr pane, reads /run/herdr/env, and one without, as from `brig sh`,
 # does not. Without the hook a pane never sees the environment brig forwarded;
 # without the gate `brig sh` would swap its fresh session token for a stale one.
-mkdir -p /run/herd
+mkdir -p /run/herdr
 had_env=no
-[ -e /run/herd/env ] && had_env=yes && mv /run/herd/env /run/herd/env.check-cli
-echo 'export HERD_CHECK=sourced' >/run/herd/env
-got=$(SSH_CONNECTION='UNKNOWN 65535 UNKNOWN 65535' bash -ic 'echo "${HERD_CHECK:-unset}"' 2>/dev/null)
-[ "$got" = sourced ] || fail "an SSH session does not read /run/herd/env"
-got=$(env -u SSH_CONNECTION bash -ic 'echo "${HERD_CHECK:-unset}"' 2>/dev/null)
-[ "$got" = unset ] || fail "a shell outside SSH reads /run/herd/env"
-rm -f /run/herd/env
-[ "$had_env" = no ] || mv /run/herd/env.check-cli /run/herd/env
+[ -e /run/herdr/env ] && had_env=yes && mv /run/herdr/env /run/herdr/env.check-cli
+echo 'export HERDR_CHECK=sourced' >/run/herdr/env
+got=$(SSH_CONNECTION='UNKNOWN 65535 UNKNOWN 65535' bash -ic 'echo "${HERDR_CHECK:-unset}"' 2>/dev/null)
+[ "$got" = sourced ] || fail "an SSH session does not read /run/herdr/env"
+got=$(env -u SSH_CONNECTION bash -ic 'echo "${HERDR_CHECK:-unset}"' 2>/dev/null)
+[ "$got" = unset ] || fail "a shell outside SSH reads /run/herdr/env"
+rm -f /run/herdr/env
+[ "$had_env" = no ] || mv /run/herdr/env.check-cli /run/herdr/env
 
 echo "ok: $(herdr --version), sshd needs no key, no baked host keys"

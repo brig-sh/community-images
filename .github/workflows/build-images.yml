@@ -45,7 +45,7 @@ on:
       image:
         description: "Image to build"
         type: choice
-        options: [all, claude-code, claude-ubuntu, codex, gemini, grok, opencode, herd, cursor]
+        options: [all, claude-code, claude-ubuntu, codex, gemini, grok, opencode, herdr, cursor]
         default: all
       push:
         description: "Publish to ghcr.io/brig-sh"
@@ -56,7 +56,7 @@ on:
         type: boolean
         default: false
       claude_version:
-        description: "Claude Code release for claude-code, claude-ubuntu and herd: latest, stable or an exact version. Empty keeps the Dockerfile default"
+        description: "Claude Code release for claude-code, claude-ubuntu and herdr: latest, stable or an exact version. Empty keeps the Dockerfile default"
         type: string
         default: ""
 
@@ -152,8 +152,8 @@ jobs:
               - "images/opencode/**"
               - "images/agent.mk"
               - ".github/workflows/build-images.yml"
-            herd:
-              - "images/herd/**"
+            herdr:
+              - "images/herdr/**"
               - "images/agent.mk"
               - ".github/workflows/build-images.yml"
             cursor:
@@ -188,8 +188,8 @@ jobs:
               - "images/grok/**"
             opencode:
               - "images/opencode/**"
-            herd:
-              - "images/herd/**"
+            herdr:
+              - "images/herdr/**"
             cursor:
               - "images/cursor/**"
 
@@ -207,7 +207,7 @@ jobs:
           CHANGED_OWN: ${{ steps.filter_own.outputs.changes }}
         run: |
           set -euo pipefail
-          PUBLISHABLE='["claude-code","claude-ubuntu","codex","gemini","grok","opencode","herd"]'
+          PUBLISHABLE='["claude-code","claude-ubuntu","codex","gemini","grok","opencode","herdr"]'
           if [ "$EVENT" = "workflow_dispatch" ]; then
             if [ "$INPUT_IMAGE" = "all" ]; then
               IMAGES="$PUBLISHABLE"
@@ -254,7 +254,7 @@ jobs:
     # Claude Code read it: agent.mk passes it as their CLAUDE_VERSION, and every
     # other image gets an empty value, which leaves its Dockerfile alone.
     env:
-      CLI_VERSION: ${{ github.event_name == 'workflow_dispatch' && (startsWith(matrix.image, 'claude-') || matrix.image == 'herd') && inputs.claude_version || '' }}
+      CLI_VERSION: ${{ github.event_name == 'workflow_dispatch' && (startsWith(matrix.image, 'claude-') || matrix.image == 'herdr') && inputs.claude_version || '' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 

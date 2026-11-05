@@ -11,9 +11,9 @@ ARG REVISION=unknown
 LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.title="herd" \
+      org.opencontainers.image.title="herdr" \
       org.opencontainers.image.description="Claude Code and a herdr server as a bootable brig guest image" \
-      sh.brig.agent="herd" \
+      sh.brig.agent="herdr" \
       sh.brig.agent.cli="claude"
 
 COPY dist/urunit /urunit

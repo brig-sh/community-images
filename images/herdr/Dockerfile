@@ -16,12 +16,12 @@
 # Bump deliberately, and resolve the digest rather than copying one:
 #   crane digest harbor.nbfc.io/nubificus/bunny:latest
 
-# herd: Claude Code (Anthropic) and a herdr server in a bootable guest image,
+# herdr: Claude Code (Anthropic) and a herdr server in a bootable guest image,
 # reachable over SSH through `brig exec`, so one herdr client on the host can
 # manage many brig sandboxes as remote machines. One agent per sandbox.
 #
 # This is claude-code's Dockerfile with two differences: the agent runs as
-# root, and the herd stanzas above the Claude Code install, which tracks
+# root, and the herdr stanzas above the Claude Code install, which tracks
 # latest and so rebuilds far more often than they change. Copied rather than
 # built FROM claude-code, so the file reads top to bottom (see CONTRIBUTING).
 #
@@ -98,8 +98,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
  && rm -rf /var/lib/apt/lists/* \
  && node --version && npx --version
 
-# Root, and only root. sshd needs root to start a session, and /run/herd, where
-# herd-sshd writes the carried environment, is root's. A rootless brig install
+# Root, and only root. sshd needs root to start a session, and /run/herdr, where
+# herdr-sshd writes the carried environment, is root's. A rootless brig install
 # needs a root guest anyway: rootlesskit maps container uid 0 to the invoking
 # user, so a root guest is that user and owns the workspace it writes. On
 # macOS hull presents the host user's files as uid 0 by default.
@@ -110,7 +110,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
 RUN mkdir -p /work
 
 # sshd is the only transport herdr has for a remote machine. It is never
-# listening: herd-sshd runs it in inetd mode (-i) on the stdin and stdout of a
+# listening: herdr-sshd runs it in inetd mode (-i) on the stdin and stdout of a
 # `brig exec`, so the guest opens no port and needs no network change.
 #
 # No SSH authentication: root has an empty password and sshd accepts it, so
@@ -132,7 +132,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-server 
       'AllowAgentForwarding no' \
       'AllowTcpForwarding no' \
       'X11Forwarding no' \
-      > /etc/ssh/sshd_config.d/herd.conf
+      > /etc/ssh/sshd_config.d/herdr.conf
 
 # herdr publishes static release binaries and no container image. The release
 # binary goes in unmodified, checked against the sha256 upstream publishes in
@@ -162,7 +162,7 @@ RUN set -eu; \
     echo "${HERDR_LICENSE_SHA256}  /usr/share/licenses/herdr/LICENSE" | sha256sum -c -; \
     herdr --version
 
-# herd-sshd carries the environment of the `brig exec` into every SSH session
+# herdr-sshd carries the environment of the `brig exec` into every SSH session
 # (see the script for why). herdr panes are interactive non-login shells, which
 # read /etc/bash.bashrc and never /etc/profile.d, so the hook goes there.
 #
@@ -172,11 +172,11 @@ RUN set -eu; \
 # left, expired if that was over 12 hours ago. sshd sets SSH_CONNECTION, also
 # in -i mode on a pipe, and a herdr pane inherits it from the herdr server;
 # brig does not set it. The parent process is no test: a pane's is herdr.
-COPY herd-sshd /usr/local/sbin/herd-sshd
-RUN chmod 0755 /usr/local/sbin/herd-sshd \
+COPY herdr-sshd /usr/local/sbin/herdr-sshd
+RUN chmod 0755 /usr/local/sbin/herdr-sshd \
  && printf '%s\n' '' \
-      '# herd: the environment brig forwarded, see /usr/local/sbin/herd-sshd' \
-      'if [ -n "${SSH_CONNECTION:-}" ] && [ -r /run/herd/env ]; then . /run/herd/env; fi' \
+      '# herdr: the environment brig forwarded, see /usr/local/sbin/herdr-sshd' \
+      'if [ -n "${SSH_CONNECTION:-}" ] && [ -r /run/herdr/env ]; then . /run/herdr/env; fi' \
       >> /etc/bash.bashrc
 
 # The native Claude Code binary. Installed to /usr/local/bin rather than left
