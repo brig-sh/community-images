@@ -31,13 +31,13 @@ a bring-your-own image; see [docs/bring-your-own-image.md](docs/bring-your-own-i
 | Gemini CLI | `gemini` | Google | `ghcr.io/brig-sh/gemini` |
 | Grok CLI | `grok` | xAI | `ghcr.io/brig-sh/grok` |
 | opencode | `opencode` | OSS | `ghcr.io/brig-sh/opencode` |
-| herd (Claude Code + herdr) | `claude` | Anthropic | `ghcr.io/brig-sh/herd` |
+| herdr (Claude Code + a herdr server) | `claude` | Anthropic | `ghcr.io/brig-sh/herdr` |
 | Cursor Agent | `cursor-agent` | Cursor | not published, see below |
 
 Claude Code and Codex are the proven core. Gemini, Grok and opencode are
 example templates -- they build, and the CLI runs, but they have had less
-mileage than the first two. herd is an example template too: the claude-code
-image plus a herdr server, so its vendor is Claude Code's.
+mileage than the first two. The herdr image is an example template too: the
+claude-code image plus a herdr server, so its vendor is Claude Code's.
 
 Image names match the agent template names, so a template row and an image
 reference stay the same string.

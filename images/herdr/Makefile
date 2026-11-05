@@ -1,8 +1,8 @@
-# herd guest image: claude-code plus a herdr server. Everything lives in
+# herdr guest image: claude-code plus a herdr server. Everything lives in
 # ../agent.mk; this file is just the per-agent data. See ../agent.mk for the
 # targets and the knobs.
 
-AGENT := herd
+AGENT := herdr
 CLI   := claude
 
 # Root, and only root; see the account note in Dockerfile. Not read by the
