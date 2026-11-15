@@ -111,7 +111,7 @@ URUNC_REPO  ?= https://github.com/urunc-dev/urunc
 # URUNC_REF is a commit, and it is the same commit two other repositories pin:
 #
 #   hull/go.mod       require github.com/urunc-dev/urunc <pseudo-version>
-#                     v0.8.2-0.20261029205741-3c00b69ff9ac
+#                     v0.8.2-0.20261110121113-5c6bc7060d4f
 #   hull-assets/PINS  URUNC_REF
 #
 # Bump all three in one change. They are one pin written down three times
@@ -130,7 +130,7 @@ URUNC_REPO  ?= https://github.com/urunc-dev/urunc
 # hull-assets' ci/check-pin-coherence.sh compares the three and fails on
 # divergence, so a bump that misses one of them stops being something you find
 # out about from a guest.
-URUNC_REF   ?= 3c00b69ff9ac1b8bb260975cdc63d18a7043558b
+URUNC_REF   ?= 5c6bc7060d4f6d33b0d4e8fd388f9f04cc88510b
 
 URUNIT_REPO ?= https://github.com/NOFireAI/urunit
 # A commit, for the same reason URUNC_REF is one: this is PID 1 in every
