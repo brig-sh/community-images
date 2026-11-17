@@ -45,7 +45,7 @@ on:
       image:
         description: "Image to build"
         type: choice
-        options: [all, claude-code, claude-ubuntu, codex, gemini, grok, opencode, herdr, cursor]
+        options: [all, claude-code, claude-ubuntu, codex, gemini, grok, opencode, herdr, cursor, pi]
         default: all
       push:
         description: "Publish to ghcr.io/brig-sh"
@@ -156,6 +156,10 @@ jobs:
               - "images/herdr/**"
               - "images/agent.mk"
               - ".github/workflows/build-images.yml"
+            pi:
+              - "images/pi/**"
+              - "images/agent.mk"
+              - ".github/workflows/build-images.yml"
             cursor:
               - "images/cursor/**"
               - "images/agent.mk"
@@ -190,6 +194,8 @@ jobs:
               - "images/opencode/**"
             herdr:
               - "images/herdr/**"
+            pi:
+              - "images/pi/**"
             cursor:
               - "images/cursor/**"
 
@@ -207,7 +213,7 @@ jobs:
           CHANGED_OWN: ${{ steps.filter_own.outputs.changes }}
         run: |
           set -euo pipefail
-          PUBLISHABLE='["claude-code","claude-ubuntu","codex","gemini","grok","opencode","herdr"]'
+          PUBLISHABLE='["claude-code","claude-ubuntu","codex","gemini","grok","opencode","herdr","pi"]'
           if [ "$EVENT" = "workflow_dispatch" ]; then
             if [ "$INPUT_IMAGE" = "all" ]; then
               IMAGES="$PUBLISHABLE"
