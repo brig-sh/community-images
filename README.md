@@ -30,11 +30,12 @@ a bring-your-own image; see [docs/bring-your-own-image.md](docs/bring-your-own-i
 | Codex | `codex` | OpenAI | `ghcr.io/brig-sh/codex` |
 | Gemini CLI | `gemini` | Google | `ghcr.io/brig-sh/gemini` |
 | Grok CLI | `grok` | xAI | `ghcr.io/brig-sh/grok` |
+| [Oh My Pi](images/omp/) | `omp` | OSS | `ghcr.io/brig-sh/omp` |
 | opencode | `opencode` | OSS | `ghcr.io/brig-sh/opencode` |
 | herdr (Claude Code + a herdr server) | `claude` | Anthropic | `ghcr.io/brig-sh/herdr` |
 | Cursor Agent | `cursor-agent` | Cursor | not published, see below |
 
-Claude Code and Codex are the proven core. Gemini, Grok and opencode are
+Claude Code and Codex are the proven core. Gemini, Grok, Oh My Pi and opencode are
 example templates -- they build, and the CLI runs, but they have had less
 mileage than the first two. The herdr image is an example template too: the
 claude-code image plus a herdr server, so its vendor is Claude Code's.
